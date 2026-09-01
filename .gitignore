@@ -1,0 +1,21 @@
+# Entorno virtual
+.venv/
+
+# Variables de entorno
+.env
+
+# Cache de Python
+__pycache__/
+*.pyc
+
+# Datos biométricos / modelos descargados
+*.jpg
+*.jpeg
+*.png
+deepface_models/
+weights/
+
+# Sistema operativo / IDE
+.vscode/
+.idea/
+.DS_Store

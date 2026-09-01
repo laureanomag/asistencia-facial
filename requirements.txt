@@ -1,0 +1,7 @@
+pyside6
+opencv-python
+deepface
+tensorflow
+keras
+psycopg[binary]
+python-dotenv
