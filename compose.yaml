@@ -1,4 +1,4 @@
-name: asistencia-facial
+name: asistencia-gimnasio
 
 services:
   db:
@@ -14,7 +14,7 @@ services:
       - "${POSTGRES_PORT}:5432"
 
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - asistencia-gimnasio_pgdata:/var/lib/postgresql/data
       - ./database/initdb:/docker-entrypoint-initdb.d:ro
 
     healthcheck:
@@ -24,4 +24,4 @@ services:
       retries: 10
 
 volumes:
-  pgdata:
+  asistencia-gimnasio_pgdata:
