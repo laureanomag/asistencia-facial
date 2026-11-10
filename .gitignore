@@ -19,3 +19,6 @@ weights/
 .vscode/
 .idea/
 .DS_Store
+
+# Respaldos
+*.bak

@@ -1,7 +1,10 @@
 pyside6
-opencv-python
+opencv-python==4.14.0.94
 deepface
-tensorflow
+tensorflow==2.21.0
+tf-keras==2.21.0
 keras
 psycopg[binary]
 python-dotenv
+openpyxl
+reportlab

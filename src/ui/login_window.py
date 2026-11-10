@@ -3,21 +3,19 @@ from PySide6.QtWidgets import (
 )
 
 from repositories.user_repository import UserRepository
-from ui.welcome_window import WelcomeWindow
+from ui.main_window import MainWindow
 
 
 class LoginWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.repo = UserRepository()
-        self.welcome_window = None
-
+        self.main_window = None
         self.setWindowTitle("Inicio de sesión")
         self.resize(420, 260)
 
         self.identifier_input = QLineEdit()
         self.identifier_input.setPlaceholderText("Usuario / Email / DNI / CUIL")
-
         self.password_input = QLineEdit()
         self.password_input.setPlaceholderText("Contraseña")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -46,6 +44,6 @@ class LoginWindow(QWidget):
             QMessageBox.critical(self, "Error", "Credenciales incorrectas.")
             return
 
-        self.welcome_window = WelcomeWindow(usuario[1])
-        self.welcome_window.show()
+        self.main_window = MainWindow(usuario)
+        self.main_window.show()
         self.close()
