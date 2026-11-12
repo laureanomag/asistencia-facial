@@ -1,6 +1,15 @@
-"""Proceso de reconocimiento facial para Zebra Gym.
-Corre separado de la interfaz para no congelar la GUI con TensorFlow/DeepFace.
-Protocolo: una línea JSON por mensaje en stdin y stdout."""
+"""Proceso de reconocimiento facial de ZebraGym.
+Corre separado de la interfaz para que TensorFlow/DeepFace no la congelen.
+Protocolo: una línea JSON por mensaje por stdin (comandos) y por stdout
+(respuestas); los logs van a stderr.
+
+Comandos:
+  {"cmd": "precargar"}                       carga el modelo y las referencias
+  {"cmd": "invalidar"}                       vuelve a leer las fotos de la base
+  {"cmd": "reconocer", "imagen": base64}     un rostro recortado (JPEG)
+  {"cmd": "confirmar", "token": t, "opcion": "entrenar" | "fichar"}   botón OK
+  {"cmd": "cancelar", "token": t}            Cancelar o cierre automático (no escribe)
+Las respuestas tienen "estado" y "mensaje" (ver recognition_logic.py)."""
 import base64
 import json
 import os
@@ -12,24 +21,45 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 
+def decodificar_imagen(texto_base64):
+    import cv2
+    import numpy as np
+    datos = np.frombuffer(base64.b64decode(texto_base64), np.uint8)
+    return cv2.imdecode(datos, cv2.IMREAD_COLOR)
+
+
+def atender(msg, face, control, decodificar=decodificar_imagen):
+    """Ejecuta un comando y devuelve la respuesta (None si no hay que responder)."""
+    cmd = msg["cmd"]
+    if cmd == "invalidar":
+        face.invalidar()
+        control.reiniciar()
+        return None
+    if cmd == "precargar":
+        face.precargar()
+        return {"estado": "MODELO_LISTO", "mensaje": "Mirá a la cámara para ingresar."}
+    if cmd == "reconocer":
+        return control.procesar(decodificar(msg["imagen"]))
+    if cmd == "confirmar":
+        return control.confirmar(msg.get("token"), msg.get("opcion"))
+    if cmd == "cancelar":
+        return control.cancelar(msg.get("token"))
+    return {"estado": "ERROR", "mensaje": f"Comando desconocido: {cmd}"}
+
+
 def main():
+    # El canal de respuestas es el stdout original; cualquier print de las
+    # librerías se redirige a stderr para no mezclarse con el protocolo.
     canal = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8")
     sys.stdout = sys.stderr
 
-    import cv2
-    import numpy as np
-
-    from repositories.gym_repository import GymRepository
     from repositories.person_repository import PersonRepository
+    from services.acceso_service import AccesoService
     from services.face_service import FaceRecognitionService
-    from services.gym_service import GymService
-    from services.recognition_logic import Confirmador, procesar
+    from services.recognition_logic import ControlDeIngreso
 
-    person_repo = PersonRepository()
-    gym_repo = GymRepository()
-    face = FaceRecognitionService(person_repo)
-    gym_service = GymService(gym_repo, person_repo)
-    confirmador = Confirmador()
+    face = FaceRecognitionService(PersonRepository())
+    control = ControlDeIngreso(face, AccesoService())
 
     def responder(datos):
         canal.write(json.dumps(datos, default=str) + "\n")
@@ -40,44 +70,12 @@ def main():
         if not linea:
             continue
         try:
-            msg = json.loads(linea)
-            cmd = msg["cmd"]
-
-            if cmd == "invalidar":
-                face.invalidar()
-                confirmador.reiniciar()
-            elif cmd == "precargar":
-                face.precargar()
-                responder({"estado": "MODELO_LISTO", "mensaje": "Esperando persona frente a cámara..."})
-            elif cmd == "reconocer":
-                datos = np.frombuffer(base64.b64decode(msg["imagen"]), np.uint8)
-                rostro = cv2.imdecode(datos, cv2.IMREAD_COLOR)
-                responder(procesar(face, gym_service, rostro, confirmador))
-            elif cmd == "confirmar_ingreso_socio":
-                ingreso_id = gym_service.confirmar_ingreso_socio(
-                    msg["socio_id"], msg["membresia_id"]
-                )
-                confirmador.reiniciar()
-                responder({"estado": "INGRESO_REGISTRADO", "ingreso_id": ingreso_id, "mensaje": "Ingreso registrado con éxito"})
-            elif cmd == "confirmar_profesor":
-                res = gym_service.confirmar_asistencia_profesor(
-                    profesor_id=msg["profesor_id"],
-                    operacion=msg["operacion"],
-                    asistencia_id=msg.get("asistencia_id"),
-                    turno_id=msg.get("turno_id"),
-                    es_cambio_turno=msg.get("es_cambio_turno", False),
-                    observaciones=msg.get("observaciones"),
-                )
-                confirmador.reiniciar()
-                responder({"estado": "PROFESOR_REGISTRADO", "resultado": res, "mensaje": f"{msg['operacion']} registrada con éxito"})
-            elif cmd == "cancelar_operacion":
-                confirmador.reiniciar()
-                responder({"estado": "OPERACION_CANCELADA", "mensaje": "Operación descartada por el usuario"})
-            else:
-                responder({"estado": "ERROR", "mensaje": f"Comando desconocido: {cmd}"})
+            respuesta = atender(json.loads(linea), face, control)
+            if respuesta is not None:
+                responder(respuesta)
         except Exception as error:
             traceback.print_exc()
-            responder({"estado": "ERROR", "mensaje": f"Error en el proceso de reconocimiento: {error}"})
+            responder({"estado": "ERROR", "mensaje": f"Error en el reconocimiento: {error}"})
 
 
 if __name__ == "__main__":

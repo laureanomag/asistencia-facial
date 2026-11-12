@@ -322,13 +322,18 @@ class Antirrebote:
         self._hasta[clave] = self.reloj() + self.segundos
 
     def bloqueado(self, clave):
+        return self.restante(clave) > 0
+
+    def restante(self, clave):
+        """Segundos que faltan para volver a atender a esa persona (0 si ya puede)."""
         hasta = self._hasta.get(clave)
         if hasta is None:
-            return False
-        if self.reloj() >= hasta:
+            return 0.0
+        falta = hasta - self.reloj()
+        if falta <= 0:
             del self._hasta[clave]
-            return False
-        return True
+            return 0.0
+        return falta
 
 
 @dataclass

@@ -1,9 +1,8 @@
 import numpy as np
 import pytest
 
-from services import face_service, recognition_logic
+from services import face_service
 from services.face_service import FaceRecognitionService, ResultadoReconocimiento
-from services.recognition_logic import Confirmador, procesar
 
 DIM = 512
 ANA = (1, "Pérez, Ana")
@@ -107,89 +106,3 @@ def test_sin_referencias(monkeypatch):
 
     monkeypatch.setattr(face_service, "_embedding", no_debe_llamarse)
     assert servicio.reconocer(rostro_bgr=None) == ResultadoReconocimiento()
-
-
-# --- procesar() y confirmaciones ---
-
-class _FaceSecuencia:
-    def __init__(self, resultados):
-        self._resultados = list(resultados)
-
-    def reconocer(self, _rostro):
-        return self._resultados.pop(0)
-
-
-class _GymFalso:
-    """Reemplaza a gym_service: registra a quién se evaluó y siempre permite."""
-    def __init__(self):
-        self.llamadas = []
-
-    def evaluar_acceso(self, persona_id):
-        self.llamadas.append(persona_id)
-        return {"permitido": True, "tipo_persona": "socio", "mensaje": "Socio habilitado"}
-
-
-RECONOCE_ANA = ResultadoReconocimiento(1, "Pérez, Ana", 0.18)
-RECONOCE_ALAN = ResultadoReconocimiento(2, "Pérez, Alan", 0.19)
-AMBIGUO = ResultadoReconocimiento(distancia=0.20,
-                                  ambiguo=(("Pérez, Ana", 0.20), ("Pérez, Alan", 0.23)))
-DESCONOCIDO = ResultadoReconocimiento(distancia=0.62)
-SIN_REFERENCIAS = ResultadoReconocimiento()
-
-
-def _intentos(monkeypatch, secuencia):
-    """Ejecuta procesar() para cada (segundo, resultado) y devuelve los
-    estados y el servicio de reglas falso."""
-    face = _FaceSecuencia(r for _t, r in secuencia)
-    asistencia = _GymFalso()
-    confirmador = Confirmador()
-    estados = []
-    for segundo, _r in secuencia:
-        monkeypatch.setattr(recognition_logic.time, "monotonic", lambda s=segundo: 1000.0 + s)
-        resultado = procesar(face, asistencia, None, confirmador)
-        estados.append(resultado["estado"])
-    return estados, asistencia
-
-
-def test_procesar_ambiguo_no_evalua_reglas(monkeypatch):
-    estados, asistencia = _intentos(monkeypatch, [(0, AMBIGUO)])
-    assert estados == ["AMBIGUO"]
-    assert asistencia.llamadas == []
-
-
-def test_mensaje_ambiguo():
-    face = _FaceSecuencia([AMBIGUO])
-    resultado = procesar(face, _GymFalso(), None, Confirmador())
-    assert resultado["mensaje"] == ("Coincidencia ambigua entre Pérez, Ana (0.200) y "
-                                    "Pérez, Alan (0.230); no se registra. "
-                                    "Mire de frente, con buena luz")
-
-
-def test_procesar_sin_referencias_y_desconocido(monkeypatch):
-    estados, asistencia = _intentos(monkeypatch, [(0, SIN_REFERENCIAS), (2, DESCONOCIDO)])
-    assert estados == ["SIN_REFERENCIAS", "NO_RECONOCIDO"]
-    assert asistencia.llamadas == []
-
-
-def test_fallidos_y_ambiguos_no_reinician_la_confirmacion(monkeypatch):
-    estados, asistencia = _intentos(monkeypatch, [
-        (0, RECONOCE_ANA), (2, AMBIGUO), (4, DESCONOCIDO), (6, RECONOCE_ANA),
-    ])
-    assert estados == ["CONFIRMANDO", "AMBIGUO", "NO_RECONOCIDO", "PROPUESTA_CONFIRMACION"]
-    assert asistencia.llamadas == [1]
-
-
-def test_otra_persona_reinicia_la_confirmacion(monkeypatch):
-    estados, asistencia = _intentos(monkeypatch, [
-        (0, RECONOCE_ANA), (2, RECONOCE_ALAN), (4, RECONOCE_ANA), (6, RECONOCE_ANA),
-    ])
-    assert estados == ["CONFIRMANDO", "CONFIRMANDO", "CONFIRMANDO", "PROPUESTA_CONFIRMACION"]
-    assert asistencia.llamadas == [1]
-
-
-def test_pasada_la_ventana_se_reinicia_la_confirmacion(monkeypatch):
-    estados, asistencia = _intentos(monkeypatch, [
-        (0, RECONOCE_ANA), (4, DESCONOCIDO), (8.5, RECONOCE_ANA), (10, RECONOCE_ANA),
-    ])
-    assert estados == ["CONFIRMANDO", "NO_RECONOCIDO", "CONFIRMANDO", "PROPUESTA_CONFIRMACION"]
-    assert asistencia.llamadas == [1]
