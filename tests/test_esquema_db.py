@@ -125,6 +125,21 @@ def test_seed_roles_planes_y_horarios(db):
     assert _valor(db, "SELECT ('2027-01-31'::date + INTERVAL '1 month')::date") == date(2027, 2, 28)
 
 
+def test_horario_repository_y_reloj(db):
+    from datetime import datetime, time, timedelta
+    from repositories.horario_repository import HorarioRepository
+    repo = HorarioRepository()
+    assert repo.franjas_del_dia(1) == [(time(7, 0), time(23, 0))]      # lunes
+    assert repo.franjas_del_dia(6) == [(time(10, 0), time(14, 0))]     # sábado
+    assert repo.franjas_del_dia(7) == []                               # domingo: cerrado
+    db.execute("UPDATE horario_atencion SET activo = FALSE WHERE dia_semana = 6")
+    assert repo.franjas_del_dia(6) == []
+    ahora = repo.ahora()
+    assert isinstance(ahora, datetime) and ahora.tzinfo is None
+    hoy_vista = _valor(db, "SELECT (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date")
+    assert ahora.date() == hoy_vista and abs(datetime.now() - ahora) < timedelta(hours=24)
+
+
 def test_seed_admin_valida_con_bcrypt(db):
     from services.auth_service import verificar_contrasenia
     persona_id, hash_, debe_cambiar = db.execute(
