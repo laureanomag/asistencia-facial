@@ -42,14 +42,8 @@ class UserRepository:
             return cur.fetchone()
 
     def obtener_roles(self, usuario_id, conn=None):
-        """Lista de códigos de rol de la cuenta."""
-        query = """
-            SELECT r.codigo
-              FROM usuario_rol ur
-              JOIN rol r ON r.id = ur.rol_id
-             WHERE ur.usuario_id = %s
-             ORDER BY r.codigo;
-        """
+        """Lista de roles de la cuenta ('administrador', 'recepcionista', 'entrenador')."""
+        query = "SELECT rol FROM usuario_rol WHERE usuario_id = %s ORDER BY rol;"
         with usar_conexion(conn) as c, c.cursor() as cur:
             cur.execute(query, (usuario_id,))
             return [fila[0] for fila in cur.fetchall()]
@@ -85,32 +79,26 @@ class UserRepository:
             cur.execute("UPDATE usuario SET activo = %s WHERE id = %s;", (activo, usuario_id))
             return cur.rowcount == 1
 
-    def asignar_rol(self, usuario_id, rol_codigo, asignado_por_usuario_id=None, conn=None):
+    def asignar_rol(self, usuario_id, rol, asignado_por_usuario_id=None, conn=None):
         """Devuelve True si se asignó, False si la cuenta ya tenía el rol.
-        Lanza ValueError si el código de rol no existe."""
+        Un rol fuera de la lista lo rechaza el CHECK de usuario_rol
+        (psycopg.errors.CheckViolation); AuthService lo valida antes."""
         query = """
-            INSERT INTO usuario_rol (usuario_id, rol_id, asignado_por_usuario_id)
-            SELECT %s, r.id, %s FROM rol r WHERE r.codigo = %s
-            ON CONFLICT (usuario_id, rol_id) DO NOTHING;
+            INSERT INTO usuario_rol (usuario_id, rol, asignado_por_usuario_id)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (usuario_id, rol) DO NOTHING;
         """
         with usar_conexion(conn) as c, c.cursor() as cur:
-            cur.execute("SELECT 1 FROM rol WHERE codigo = %s;", (rol_codigo,))
-            if cur.fetchone() is None:
-                raise ValueError(f"Rol inexistente: {rol_codigo}")
-            cur.execute(query, (usuario_id, asignado_por_usuario_id, rol_codigo))
+            cur.execute(query, (usuario_id, rol, asignado_por_usuario_id))
             return cur.rowcount == 1
 
-    def quitar_rol(self, usuario_id, rol_codigo, conn=None):
-        query = """
-            DELETE FROM usuario_rol ur
-             USING rol r
-             WHERE ur.rol_id = r.id AND ur.usuario_id = %s AND r.codigo = %s;
-        """
+    def quitar_rol(self, usuario_id, rol, conn=None):
+        query = "DELETE FROM usuario_rol WHERE usuario_id = %s AND rol = %s;"
         with usar_conexion(conn) as c, c.cursor() as cur:
-            cur.execute(query, (usuario_id, rol_codigo))
+            cur.execute(query, (usuario_id, rol))
             return cur.rowcount == 1
 
-    def contar_activos_con_rol(self, rol_codigo, conn=None):
+    def contar_activos_con_rol(self, rol, conn=None):
         """Cuentas activas que tienen el rol. Bloquea esas filas hasta el fin
         de la transacción, para que dos cambios simultáneos no dejen el
         sistema sin administrador."""
@@ -118,10 +106,9 @@ class UserRepository:
             SELECT u.id
               FROM usuario u
               JOIN usuario_rol ur ON ur.usuario_id = u.id
-              JOIN rol r          ON r.id = ur.rol_id
-             WHERE r.codigo = %s AND u.activo = TRUE
+             WHERE ur.rol = %s AND u.activo = TRUE
                FOR UPDATE OF u;
         """
         with usar_conexion(conn) as c, c.cursor() as cur:
-            cur.execute(query, (rol_codigo,))
+            cur.execute(query, (rol,))
             return len(cur.fetchall())

@@ -4,12 +4,6 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- solo para generar el hash de la cuenta inicial
 
--- Roles del sistema
-INSERT INTO rol (codigo, nombre) VALUES
-    ('administrador', 'Administrador'),
-    ('recepcionista', 'Recepcionista'),
-    ('entrenador',    'Entrenador');
-
 -- Horario habitual: lunes a viernes de corrido, sábados a la mañana, domingos cerrado
 INSERT INTO horario_atencion (dia_semana, hora_apertura, hora_cierre) VALUES
     (1, '07:00', '23:00'),
@@ -29,12 +23,5 @@ INSERT INTO plan (nombre, vigencia, entrenamientos_mensuales, max_dias_semanales
 INSERT INTO usuario (nombre_usuario, contrasenia_hash, debe_cambiar_contrasenia)
 VALUES ('admin', crypt('admin123', gen_salt('bf', 12)), TRUE);
 
-INSERT INTO usuario_rol (usuario_id, rol_id)
-SELECT u.id, r.id FROM usuario u, rol r
-WHERE u.nombre_usuario = 'admin' AND r.codigo = 'administrador';
-
--- Feriados: cargarlos desde el sistema a medida que se publican. Ejemplos:
--- INSERT INTO dia_especial (fecha, tipo, descripcion, abre)
---     VALUES ('2026-12-25', 'feriado_nacional', 'Navidad', FALSE);
--- INSERT INTO dia_especial (fecha, tipo, descripcion, abre, hora_apertura, hora_cierre)
---     VALUES ('2026-XX-XX', 'feriado_provincial', '...', TRUE, '09:00', '13:00');
+INSERT INTO usuario_rol (usuario_id, rol)
+SELECT id, 'administrador' FROM usuario WHERE nombre_usuario = 'admin';

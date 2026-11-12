@@ -1,10 +1,9 @@
 -- =====================================================================
 --  ZEBRAGYM - Esquema oficial (PostgreSQL 16)
---  16 tablas + 1 vista. Orden de creación = orden de carga (sin ciclos).
+--  14 tablas + 1 vista. Orden de creación = orden de carga (sin ciclos).
 --
 --  Requisitos del gimnasio que cubre:
 --   - Horario: lunes a viernes 7 a 23 h, sábados 10 a 14 h, domingos cerrado.
---   - Feriados nacionales y provinciales con horario propio (dia_especial).
 --   - Pases de ZebraGym: por día, 3 x semana y pase libre (mensualidad).
 --     Cada plan puede tener, si hace falta: límite diario, límite semanal y
 --     cupo de accesos en la vigencia.
@@ -32,14 +31,6 @@ CREATE TABLE persona (
     domicilio           VARCHAR(200),
     creado_en           TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_persona_dni CHECK (dni ~ '^[0-9]{7,8}$')
-);
-
--- Roles del sistema (catálogo fijo)
-CREATE TABLE rol (
-    id      SERIAL PRIMARY KEY,
-    codigo  VARCHAR(30) NOT NULL UNIQUE,
-    nombre  VARCHAR(50) NOT NULL,
-    CONSTRAINT chk_rol_codigo CHECK (codigo IN ('administrador', 'recepcionista', 'entrenador'))
 );
 
 -- Planes de membresía
@@ -70,23 +61,6 @@ CREATE TABLE horario_atencion (
     CONSTRAINT chk_horario_horas CHECK (hora_cierre > hora_apertura),
     CONSTRAINT uq_horario_franja UNIQUE (dia_semana, hora_apertura)
 );
-
--- Feriados y días con horario distinto al habitual
-CREATE TABLE dia_especial (
-    id             SERIAL PRIMARY KEY,
-    fecha          DATE         NOT NULL UNIQUE,
-    tipo           VARCHAR(30)  NOT NULL,
-    descripcion    VARCHAR(150),
-    abre           BOOLEAN      NOT NULL,
-    hora_apertura  TIME,
-    hora_cierre    TIME,
-    CONSTRAINT chk_dia_especial_tipo CHECK (tipo IN ('feriado_nacional', 'feriado_provincial', 'especial')),
-    CONSTRAINT chk_dia_especial_horario CHECK (
-        (abre = TRUE  AND hora_apertura IS NOT NULL AND hora_cierre IS NOT NULL AND hora_cierre > hora_apertura)
-     OR (abre = FALSE AND hora_apertura IS NULL     AND hora_cierre IS NULL)
-    )
-);
-
 
 -- ---------------------------------------------------------------------
 -- NIVEL 2
@@ -121,13 +95,15 @@ CREATE UNIQUE INDEX uq_usuario_nombre ON usuario (LOWER(nombre_usuario));
 -- NIVEL 3
 -- ---------------------------------------------------------------------
 
--- Una cuenta puede tener varios roles (ej.: administrador y entrenador)
+-- Una cuenta puede tener varios roles (ej.: administrador y entrenador).
+-- Los roles son una lista fija, controlada con CHECK.
 CREATE TABLE usuario_rol (
     usuario_id               INT         NOT NULL REFERENCES usuario (id) ON DELETE CASCADE,
-    rol_id                   INT         NOT NULL REFERENCES rol (id)     ON DELETE RESTRICT,
+    rol                      VARCHAR(30) NOT NULL,
     asignado_por_usuario_id  INT         REFERENCES usuario (id)          ON DELETE RESTRICT,
     asignado_en              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (usuario_id, rol_id)
+    PRIMARY KEY (usuario_id, rol),
+    CONSTRAINT chk_usuario_rol CHECK (rol IN ('administrador', 'recepcionista', 'entrenador'))
 );
 
 CREATE TABLE socio (
@@ -278,7 +254,7 @@ CREATE TABLE acceso (
         'cupo_agotado',           -- usó todos los accesos del plan
         'limite_diario',          -- ya usó los ingresos permitidos hoy
         'limite_semanal',         -- ya entrenó los días permitidos esta semana
-        'gimnasio_cerrado'))      -- fuera del horario de atención o día cerrado
+        'gimnasio_cerrado'))      -- fuera del horario de atención (horario_atencion)
 );
 
 
@@ -301,7 +277,7 @@ ALTER TABLE fichaje
 -- ÍNDICES
 -- ---------------------------------------------------------------------
 
-CREATE INDEX idx_usuario_rol_rol           ON usuario_rol (rol_id);
+CREATE INDEX idx_usuario_rol_rol           ON usuario_rol (rol);
 CREATE INDEX idx_plan_entrenamiento_socio  ON plan_entrenamiento (socio_id);
 CREATE INDEX idx_membresia_socio           ON membresia (socio_id, fecha_inicio);
 CREATE INDEX idx_membresia_plan            ON membresia (plan_id);

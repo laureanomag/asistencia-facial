@@ -77,8 +77,7 @@ def _usuario(conn, persona_id, nombre, roles=("entrenador",)):
                        "VALUES (%s, %s, %s) RETURNING id",
                  (persona_id, nombre, hashear_contrasenia("clave-segura")))
     for rol in roles:
-        conn.execute("INSERT INTO usuario_rol (usuario_id, rol_id) "
-                     "SELECT %s, id FROM rol WHERE codigo = %s", (uid, rol))
+        conn.execute("INSERT INTO usuario_rol (usuario_id, rol) VALUES (%s, %s)", (uid, rol))
     return uid
 
 
@@ -103,8 +102,14 @@ def _acceso_permitido(conn, socio_id, membresia_id):
 # --- Datos iniciales ---
 
 def test_seed_roles_planes_y_horarios(db):
-    roles = [r[0] for r in db.execute("SELECT codigo FROM rol ORDER BY codigo")]
-    assert roles == ["administrador", "entrenador", "recepcionista"]
+    tablas = [r[0] for r in db.execute(
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = 'zg_prueba' AND table_type = 'BASE TABLE' ORDER BY table_name")]
+    assert len(tablas) == 14 and "rol" not in tablas and "dia_especial" not in tablas
+    roles_admin = [r[0] for r in db.execute(
+        "SELECT ur.rol FROM usuario_rol ur JOIN usuario u ON u.id = ur.usuario_id "
+        "WHERE u.nombre_usuario = 'admin'")]
+    assert roles_admin == ["administrador"]
     planes = db.execute("""
         SELECT nombre, vigencia = INTERVAL '1 month', vigencia = INTERVAL '1 day',
                max_ingresos_diarios, max_dias_semanales, entrenamientos_mensuales
@@ -194,9 +199,23 @@ def test_nombre_de_usuario_unico_sin_distinguir_mayusculas(db):
 
 def test_rol_repetido_o_inexistente(db):
     uid = _usuario(db, _persona(db), "ana")
-    _falla(db, errors.UniqueViolation, "INSERT INTO usuario_rol (usuario_id, rol_id) "
-                                       "SELECT %s, id FROM rol WHERE codigo = 'entrenador'", (uid,))
-    _falla(db, errors.CheckViolation, "INSERT INTO rol (codigo, nombre) VALUES ('duenio', 'Dueño')")
+    _falla(db, errors.UniqueViolation, "INSERT INTO usuario_rol (usuario_id, rol) "
+                                       "VALUES (%s, 'entrenador')", (uid,))
+    for rol in ("duenio", "socio", "profesor"):
+        _falla(db, errors.CheckViolation, "INSERT INTO usuario_rol (usuario_id, rol) "
+                                          "VALUES (%s, %s)", (uid, rol))
+
+
+def test_roles_de_cuenta_con_user_repository(db):
+    from repositories.user_repository import UserRepository
+    repo = UserRepository()
+    uid = _usuario(db, _persona(db), "ana", ())
+    assert repo.asignar_rol(uid, "entrenador") and not repo.asignar_rol(uid, "entrenador")
+    assert repo.asignar_rol(uid, "recepcionista")
+    assert repo.obtener_roles(uid) == ["entrenador", "recepcionista"]
+    assert repo.quitar_rol(uid, "recepcionista") and not repo.quitar_rol(uid, "recepcionista")
+    assert repo.contar_activos_con_rol("administrador") == 1      # el admin del seed
+    assert repo.contar_activos_con_rol("entrenador") == 1
 
 
 # --- Perfil facial ---

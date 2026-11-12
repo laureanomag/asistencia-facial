@@ -67,13 +67,12 @@ class PersonRepository:
         Los valores son None (o lista vacía) cuando no existe la relación."""
         query = """
             SELECT s.id, s.activo, u.id, u.activo,
-                   COALESCE(ARRAY_AGG(r.codigo ORDER BY r.codigo)
-                            FILTER (WHERE r.codigo IS NOT NULL), '{}')
+                   COALESCE(ARRAY_AGG(ur.rol ORDER BY ur.rol)
+                            FILTER (WHERE ur.rol IS NOT NULL), '{}')
               FROM persona p
               LEFT JOIN socio s        ON s.persona_id = p.id
               LEFT JOIN usuario u      ON u.persona_id = p.id
               LEFT JOIN usuario_rol ur ON ur.usuario_id = u.id
-              LEFT JOIN rol r          ON r.id = ur.rol_id
              WHERE p.id = %s
              GROUP BY s.id, s.activo, u.id, u.activo;
         """
