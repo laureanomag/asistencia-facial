@@ -6,7 +6,7 @@ import pytest
 from services import reglas_ingreso as r
 from services.reglas_ingreso import Franja, Jornada, evaluar_fichaje, evaluar_socio
 
-LUNES_A_VIERNES = [Franja(time(7, 0), time(23, 0))]
+LUNES_A_VIERNES = [Franja(time(7, 30), time(23, 0))]
 SABADO = [Franja(time(10, 0), time(14, 0))]
 DOMINGO = []
 JUEVES = datetime(2026, 11, 12, 18, 30)          # jueves 12/11/2026, 18:30
@@ -33,7 +33,7 @@ def evaluar(estado_socio=None, socio=ACTIVO, franjas=LUNES_A_VIERNES, ahora=JUEV
 # --- Horario de atención ---
 
 @pytest.mark.parametrize("hora, abierto", [
-    (time(6, 59), False), (time(7, 0), True), (time(22, 59), True), (time(23, 0), False),
+    (time(7, 29), False), (time(7, 30), True), (time(22, 59), True), (time(23, 0), False),
 ])
 def test_bordes_lunes_a_viernes(hora, abierto):
     assert (r.franja_actual(LUNES_A_VIERNES, hora) is not None) == abierto
@@ -54,9 +54,9 @@ def test_varias_franjas_en_un_dia():
 
 
 def test_gimnasio_cerrado_informa_el_horario_de_hoy():
-    d = evaluar(ahora=JUEVES.replace(hour=6, minute=30))
+    d = evaluar(ahora=JUEVES.replace(hour=7, minute=15))
     assert (d.permitido, d.motivo) == (False, r.GIMNASIO_CERRADO)
-    assert d.mensaje == "El gimnasio está cerrado. Horario de hoy: 07:00 a 23:00 hs."
+    assert d.mensaje == "El gimnasio está cerrado. Horario de hoy: 07:30 a 23:00 hs."
 
 
 def test_domingo_cerrado():

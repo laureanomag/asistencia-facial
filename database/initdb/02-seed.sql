@@ -4,13 +4,13 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- solo para generar el hash de la cuenta inicial
 
--- Horario habitual: lunes a viernes de corrido, sábados a la mañana, domingos cerrado
+-- Horario habitual: lunes a viernes de 7:30 a 23, sábados a la mañana, domingos cerrado
 INSERT INTO horario_atencion (dia_semana, hora_apertura, hora_cierre) VALUES
-    (1, '07:00', '23:00'),
-    (2, '07:00', '23:00'),
-    (3, '07:00', '23:00'),
-    (4, '07:00', '23:00'),
-    (5, '07:00', '23:00'),
+    (1, '07:30', '23:00'),
+    (2, '07:30', '23:00'),
+    (3, '07:30', '23:00'),
+    (4, '07:30', '23:00'),
+    (5, '07:30', '23:00'),
     (6, '10:00', '14:00');
 
 -- Pases de ZebraGym. PRECIOS EN 0: cargar los valores reales antes de vender.

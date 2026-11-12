@@ -129,7 +129,7 @@ def test_horario_repository_y_reloj(db):
     from datetime import datetime, time, timedelta
     from repositories.horario_repository import HorarioRepository
     repo = HorarioRepository()
-    assert repo.franjas_del_dia(1) == [(time(7, 0), time(23, 0))]      # lunes
+    assert repo.franjas_del_dia(1) == [(time(7, 30), time(23, 0))]     # lunes
     assert repo.franjas_del_dia(6) == [(time(10, 0), time(14, 0))]     # sábado
     assert repo.franjas_del_dia(7) == []                               # domingo: cerrado
     db.execute("UPDATE horario_atencion SET activo = FALSE WHERE dia_semana = 6")
