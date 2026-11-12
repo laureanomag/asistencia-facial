@@ -22,9 +22,14 @@ class SocioRepository:
                                 contacto_emergencia_telefono, registrado_por_usuario_id))
             return cur.fetchone()[0]
 
-    def obtener_por_id(self, socio_id, conn=None):
+    def obtener_por_id(self, socio_id, bloquear=False, conn=None):
+        """Con bloquear=True la fila del socio queda bloqueada hasta el fin de
+        la transacción: dos confirmaciones simultáneas del mismo socio se
+        evalúan una después de la otra (no se pasan los límites)."""
+        query = f"SELECT {COLUMNAS_SOCIO} FROM socio WHERE id = %s"
+        query += " FOR UPDATE;" if bloquear else ";"
         with usar_conexion(conn) as c, c.cursor() as cur:
-            cur.execute(f"SELECT {COLUMNAS_SOCIO} FROM socio WHERE id = %s;", (socio_id,))
+            cur.execute(query, (socio_id,))
             return cur.fetchone()
 
     def obtener_por_persona(self, persona_id, conn=None):

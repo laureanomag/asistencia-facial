@@ -223,6 +223,7 @@ MATRIZ_ESPERADA = {
     "acceso.operar_camara": "ARE",
     "plan_entrenamiento.gestionar": "AE",
     "reporte.consultar": "A",
+    "fichaje.consultar_propio": "ARE",
 }
 LETRAS = {"A": ADMINISTRADOR, "R": RECEPCIONISTA, "E": ENTRENADOR}
 

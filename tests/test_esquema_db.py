@@ -1,102 +1,16 @@
 """Pruebas del esquema real (database/initdb/01-schema.sql + 02-seed.sql) en PostgreSQL.
-
-Se ejecutan solo si está definida la variable ZEBRAGYM_TEST_DSN, por ejemplo:
-    ZEBRAGYM_TEST_DSN="host=localhost port=5432 dbname=asistencia_gimnasio user=admin password=..."
-Todo corre dentro de un esquema temporal (zg_prueba) en una transacción que
-SIEMPRE termina en rollback: no crea ni deja nada en la base."""
-import os
+Ver tests/apoyo_db.py: se ejecutan solo con ZEBRAGYM_TEST_DSN y nunca dejan datos."""
 from datetime import date
-from pathlib import Path
 
 import pytest
+from psycopg import errors
 
-psycopg = pytest.importorskip("psycopg")
-from psycopg import errors  # noqa: E402
+from apoyo_db import (
+    acceso_permitido as _acceso_permitido, falla as _falla, membresia as _membresia,
+    persona as _persona, requiere_base, socio as _socio, usuario as _usuario, valor as _valor,
+)
 
-DSN = os.getenv("ZEBRAGYM_TEST_DSN")
-pytestmark = pytest.mark.skipif(not DSN, reason="ZEBRAGYM_TEST_DSN no definida")
-
-INITDB = Path(__file__).resolve().parent.parent / "database" / "initdb"
-
-
-class _MismaConexion:
-    """Hace que los repositorios usen la conexión de la prueba (sin commit)."""
-
-    def __init__(self, conn):
-        self.conn = conn
-
-    def __enter__(self):
-        return self.conn
-
-    def __exit__(self, *exc):
-        return False
-
-
-@pytest.fixture(scope="module")
-def base():
-    with psycopg.connect(DSN, autocommit=True) as conn:
-        with conn.transaction(force_rollback=True):
-            conn.execute("CREATE SCHEMA zg_prueba")
-            conn.execute("SET LOCAL search_path TO zg_prueba, public")
-            conn.execute((INITDB / "01-schema.sql").read_text(encoding="utf-8"))
-            conn.execute((INITDB / "02-seed.sql").read_text(encoding="utf-8"))
-            yield conn
-
-
-@pytest.fixture
-def db(base, monkeypatch):
-    from config import database
-    monkeypatch.setattr(database, "get_connection", lambda: _MismaConexion(base))
-    with base.transaction(force_rollback=True):
-        yield base
-
-
-def _falla(conn, error, sql, params=()):
-    with pytest.raises(error):
-        with conn.transaction():
-            conn.execute(sql, params)
-
-
-def _valor(conn, sql, params=()):
-    return conn.execute(sql, params).fetchone()[0]
-
-
-def _persona(conn, dni="30111222", nombre="Ana", apellido="Pérez"):
-    return _valor(conn, "INSERT INTO persona (dni, nombre, apellido) VALUES (%s,%s,%s) RETURNING id",
-                  (dni, nombre, apellido))
-
-
-def _socio(conn, persona_id):
-    return _valor(conn, "INSERT INTO socio (persona_id, contacto_emergencia_telefono) "
-                        "VALUES (%s, '388') RETURNING id", (persona_id,))
-
-
-def _usuario(conn, persona_id, nombre, roles=("entrenador",)):
-    from services.auth_service import hashear_contrasenia
-    uid = _valor(conn, "INSERT INTO usuario (persona_id, nombre_usuario, contrasenia_hash) "
-                       "VALUES (%s, %s, %s) RETURNING id",
-                 (persona_id, nombre, hashear_contrasenia("clave-segura")))
-    for rol in roles:
-        conn.execute("INSERT INTO usuario_rol (usuario_id, rol) VALUES (%s, %s)", (uid, rol))
-    return uid
-
-
-def _membresia(conn, socio_id, plan="Pase libre", precio=100, desde=0, cupo=None):
-    """Membresía que empieza `desde` días después de hoy (hora de Argentina) y
-    vence en fecha_inicio + plan.vigencia, como la calcula la app."""
-    return _valor(conn, """
-        INSERT INTO membresia (socio_id, plan_id, fecha_inicio, fecha_vencimiento, precio,
-                               entrenamientos_mensuales, max_dias_semanales, max_ingresos_diarios)
-        SELECT %s, id, h.d + %s, (h.d + %s + vigencia)::date, %s,
-               COALESCE(%s, entrenamientos_mensuales), max_dias_semanales, max_ingresos_diarios
-          FROM plan,
-               (SELECT (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS d) h
-         WHERE nombre = %s RETURNING id""", (socio_id, desde, desde, precio, cupo, plan))
-
-
-def _acceso_permitido(conn, socio_id, membresia_id):
-    conn.execute("INSERT INTO acceso (socio_id, membresia_id, resultado) VALUES (%s, %s, 'permitido')",
-                 (socio_id, membresia_id))
+pytestmark = requiere_base
 
 
 # --- Datos iniciales ---

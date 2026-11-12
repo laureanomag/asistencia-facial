@@ -41,6 +41,22 @@ class UserRepository:
                         (persona_id,))
             return cur.fetchone()
 
+    def listar_empleados(self, conn=None):
+        """Cuentas con persona vinculada y rol entrenador o recepcionista
+        (las que fichan): (id, nombre, apellido, nombre_usuario, activo)."""
+        query = """
+            SELECT u.id, p.nombre, p.apellido, u.nombre_usuario, u.activo
+              FROM usuario u
+              JOIN persona p ON p.id = u.persona_id
+             WHERE EXISTS (SELECT 1 FROM usuario_rol ur
+                            WHERE ur.usuario_id = u.id
+                              AND ur.rol IN ('entrenador', 'recepcionista'))
+             ORDER BY p.apellido, p.nombre;
+        """
+        with usar_conexion(conn) as c, c.cursor() as cur:
+            cur.execute(query)
+            return cur.fetchall()
+
     def obtener_roles(self, usuario_id, conn=None):
         """Lista de roles de la cuenta ('administrador', 'recepcionista', 'entrenador')."""
         query = "SELECT rol FROM usuario_rol WHERE usuario_id = %s ORDER BY rol;"

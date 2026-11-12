@@ -28,6 +28,7 @@ MEMBRESIA_RENOVAR = "membresia.renovar"
 ACCESO_OPERAR_CAMARA = "acceso.operar_camara"
 PLAN_ENTRENAMIENTO_GESTIONAR = "plan_entrenamiento.gestionar"
 REPORTE_CONSULTAR = "reporte.consultar"
+FICHAJE_CONSULTAR_PROPIO = "fichaje.consultar_propio"   # con jornada.gestionar se ven todos
 
 A, R, E = ADMINISTRADOR, RECEPCIONISTA, ENTRENADOR
 MATRIZ_PERMISOS = {
@@ -43,6 +44,7 @@ MATRIZ_PERMISOS = {
     ACCESO_OPERAR_CAMARA:         {A, R, E},
     PLAN_ENTRENAMIENTO_GESTIONAR: {A, E},
     REPORTE_CONSULTAR:            {A},
+    FICHAJE_CONSULTAR_PROPIO:     {A, R, E},
 }
 del A, R, E
 

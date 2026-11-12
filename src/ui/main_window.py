@@ -39,7 +39,7 @@ SECCIONES = (
             "Cobros y renovaciones", "Alta y renovación de membresías con su pago", 9),
     Seccion("estado", "Estado del socio", "estado", auth.MEMBRESIA_CONSULTAR,
             "Estado del socio", "Plan, vencimiento, ingresos de la semana y pagos", 10),
-    Seccion("fichajes", "Fichajes", "fichajes", auth.JORNADA_GESTIONAR,
+    Seccion("fichajes", "Fichajes", "fichajes", auth.FICHAJE_CONSULTAR_PROPIO,
             "Fichajes", "Entradas y salidas del personal, por empleado y por fecha", 13),
     Seccion("jornadas", "Jornadas", "jornadas", auth.JORNADA_GESTIONAR,
             "Jornadas", "Turnos de los entrenadores y sus cambios", 12),

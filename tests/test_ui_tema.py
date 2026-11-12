@@ -58,8 +58,9 @@ def test_hoja_de_estilos_usa_la_paleta(app):
 
 
 @pytest.mark.parametrize("roles, esperado", [
-    ({RECEPCIONISTA}, ["Control de acceso", "Socios", "Cobros y renovaciones", "Estado del socio"]),
-    ({ENTRENADOR}, ["Control de acceso", "Socios", "Estado del socio"]),
+    ({RECEPCIONISTA}, ["Control de acceso", "Socios", "Cobros y renovaciones", "Estado del socio",
+                       "Fichajes"]),
+    ({ENTRENADOR}, ["Control de acceso", "Socios", "Estado del socio", "Fichajes"]),
     ({ADMINISTRADOR}, ["Control de acceso", "Socios", "Cobros y renovaciones", "Estado del socio",
                        "Fichajes", "Jornadas", "Informes", "Configuración"]),
 ])
