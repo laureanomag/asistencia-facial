@@ -7,14 +7,14 @@ import cv2
 import numpy as np
 
 MODELO = "Facenet512"
-UMBRAL = 0.40  # distancia coseno máxima para aceptar la mejor coincidencia (enunciado)
-# Si el segundo alumno más cercano está a menos de esta diferencia del primero,
+UMBRAL = 0.35  # distancia coseno máxima para aceptar la mejor coincidencia
+# Si la segunda persona más cercana está a menos de esta diferencia de la primera,
 # la coincidencia es ambigua (por ejemplo, hermanos) y no se reconoce a nadie.
 MARGEN_AMBIGUEDAD = 0.05
 
 
 def _umbral():
-    """0.40 por defecto. Se puede cambiar para pruebas con la variable
+    """0.35 por defecto. Se puede cambiar para pruebas con la variable
     UMBRAL_RECONOCIMIENTO en el archivo .env (por ejemplo 0.30)."""
     try:
         return float(os.getenv("UMBRAL_RECONOCIMIENTO", UMBRAL))
@@ -33,36 +33,38 @@ def _margen_ambiguedad():
 @dataclass
 class ResultadoReconocimiento:
     """Resultado de reconocer().
-    - alumno_id / nombre: el alumno reconocido, o None si no se reconoce
+    - persona_id / nombre: la persona reconocida, o None si no se reconoce
       (desconocido, ambiguo o sin referencias).
     - distancia: mejor distancia coseno encontrada (None sin referencias).
-    - ambiguo: None, o ((nombre1, d1), (nombre2, d2)) con los dos alumnos
-      demasiado parecidos."""
-    alumno_id: object = None
+    - ambiguo: None, o ((nombre1, d1), (nombre2, d2)) con las dos personas
+      demasiado parecidas.
+    El rostro identifica a la PERSONA, no a su rol: si es socio, entrenador
+    o ambas cosas lo deciden las reglas de negocio."""
+    persona_id: object = None
     nombre: str = None
     distancia: float = None
     ambiguo: tuple = None
 
 
-def distancias_por_alumno(matriz, etiquetas, actual):
-    """Mejor distancia coseno de cada alumno entre todas sus fotos de
-    referencia. Devuelve [(alumno_id, nombre, distancia)] ordenada de menor a
+def distancias_por_persona(matriz, etiquetas, actual):
+    """Mejor distancia coseno de cada persona entre todas sus fotos de
+    referencia. Devuelve [(persona_id, nombre, distancia)] ordenada de menor a
     mayor distancia. matriz y actual ya vienen normalizados."""
     distancias = 1.0 - matriz @ actual
     mejores = {}
-    for (alumno_id, nombre), d in zip(etiquetas, distancias):
+    for (persona_id, nombre), d in zip(etiquetas, distancias):
         d = float(d)
-        if alumno_id not in mejores or d < mejores[alumno_id][1]:
-            mejores[alumno_id] = (nombre, d)
-    return sorted(((a, n, d) for a, (n, d) in mejores.items()), key=lambda r: r[2])
+        if persona_id not in mejores or d < mejores[persona_id][1]:
+            mejores[persona_id] = (nombre, d)
+    return sorted(((p, n, d) for p, (n, d) in mejores.items()), key=lambda r: r[2])
 
 
 def decidir(ranking, umbral, margen):
-    """Aplica el umbral y el margen de ambigüedad al ranking por alumno."""
+    """Aplica el umbral y el margen de ambigüedad al ranking por persona."""
     if not ranking:
         return ResultadoReconocimiento()
 
-    alumno_id, nombre, distancia = ranking[0]
+    persona_id, nombre, distancia = ranking[0]
     if distancia > umbral:
         return ResultadoReconocimiento(distancia=distancia)
 
@@ -74,7 +76,7 @@ def decidir(ranking, umbral, margen):
                 ambiguo=((nombre, distancia), (nombre2, distancia2)),
             )
 
-    return ResultadoReconocimiento(alumno_id, nombre, distancia)
+    return ResultadoReconocimiento(persona_id, nombre, distancia)
 
 
 class FaceDetector:
@@ -152,17 +154,17 @@ def _normalizar(v):
 
 class FaceRecognitionService:
     """Genera y cachea los embeddings de referencia (Frontal, Izquierda,
-    Derecha de cada alumno) y compara el rostro actual por distancia coseno."""
+    Derecha de cada persona: socios y personal) y compara el rostro actual por distancia coseno."""
 
-    def __init__(self, student_repository):
-        self._repo = student_repository
+    def __init__(self, person_repository):
+        self._repo = person_repository
         self._detector = FaceDetector()  # instancia propia (se usa fuera del hilo de UI)
         self._lock = threading.Lock()
         self._matriz = None   # embeddings normalizados, una fila por referencia
-        self._etiquetas = []  # (alumno_id, "Apellido, Nombre") por fila
+        self._etiquetas = []  # (persona_id, "Apellido, Nombre") por fila
 
     def invalidar(self):
-        """Fuerza recargar referencias (por ejemplo, tras registrar alumnos).
+        """Fuerza recargar referencias (por ejemplo, tras registrar personas).
         No toma el lock a propósito: se llama desde la interfaz y no debe
         quedarse esperando a una carga en curso."""
         self._matriz = None
@@ -185,7 +187,7 @@ class FaceRecognitionService:
         vectores, etiquetas = [], []
         filas = self._repo.obtener_referencias()
         print(f"[Reconocimiento] Procesando {len(filas)} fotos de referencia...", flush=True)
-        for alumno_id, apellido, nombre, _angulo, imagen in filas:
+        for persona_id, apellido, nombre, _angulo, imagen in filas:
             if imagen is None:
                 continue
             try:
@@ -194,14 +196,14 @@ class FaceRecognitionService:
                     continue
                 caras = self._detector.detectar(img) or self._detector.detectar(img, permisivo=True)
                 if not caras:
-                    print(f"[Reconocimiento] Foto sin rostro detectable (alumno {alumno_id}, {_angulo}): se omite", flush=True)
+                    print(f"[Reconocimiento] Foto sin rostro detectable (persona {persona_id}, {_angulo}): se omite", flush=True)
                     continue  # foto deficiente: no sirve como referencia
                 rect = max(caras, key=lambda c: c[2] * c[3])
                 vectores.append(_embedding(self._detector.recortar(img, rect)))
-                etiquetas.append((alumno_id, f"{apellido}, {nombre}"))
+                etiquetas.append((persona_id, f"{apellido}, {nombre}"))
             except Exception as error:
                 # Una foto problemática se omite; no impide cargar las demás.
-                print(f"[Reconocimiento] No se pudo usar una foto (alumno {alumno_id}, {_angulo}): {error}", flush=True)
+                print(f"[Reconocimiento] No se pudo usar una foto (persona {persona_id}, {_angulo}): {error}", flush=True)
 
         self._matriz = _normalizar(np.vstack(vectores)) if vectores else np.empty((0, 512), np.float32)
         self._etiquetas = etiquetas
@@ -209,8 +211,8 @@ class FaceRecognitionService:
 
     def reconocer(self, rostro_bgr):
         """Devuelve un ResultadoReconocimiento. Se compara la mejor distancia
-        de cada alumno (entre todas sus fotos): se reconoce al más cercano sólo
-        si no supera el umbral y si el segundo alumno no está demasiado cerca."""
+        de cada persona (entre todas sus fotos): se reconoce al más cercano sólo
+        si no supera el umbral y si la segunda persona no está demasiado cerca."""
         with self._lock:
             if self._matriz is None:
                 self._cargar_referencias()
@@ -220,8 +222,8 @@ class FaceRecognitionService:
             return ResultadoReconocimiento()
 
         actual = _normalizar(_embedding(rostro_bgr))
-        ranking = distancias_por_alumno(matriz, etiquetas, actual)
+        ranking = distancias_por_persona(matriz, etiquetas, actual)
         detalle = " | ".join(f"{nombre} {d:.3f}" for _id, nombre, d in ranking)
-        print(f"[Reconocimiento] Distancias por alumno: {detalle}", flush=True)
+        print(f"[Reconocimiento] Distancias por persona: {detalle}", flush=True)
 
         return decidir(ranking, _umbral(), _margen_ambiguedad())

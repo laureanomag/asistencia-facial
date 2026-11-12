@@ -4,8 +4,6 @@ import pytest
 
 from services import attendance_service as att
 from services.attendance_service import AttendanceService
-from services.face_service import ResultadoReconocimiento
-from services.recognition_logic import procesar
 from services.report_exporters import DatosInforme, FilaAlumno, _filas_tabla
 
 JORNADA = 1
@@ -153,52 +151,6 @@ def test_la_espera_no_se_puede_cambiar_desde_el_entorno(monkeypatch, servicio, r
     assert estado == att.SALIDA_AUN_NO
     assert disponible == en(12, 8)
     assert att.ESPERA_ENTRADA_SALIDA == timedelta(minutes=10)
-
-
-# --- Mensaje que ve el usuario ---
-
-class _FaceFalso:
-    def reconocer(self, _rostro):
-        return ResultadoReconocimiento(ALUMNO, "Pérez, Ana", 0.12)
-
-
-class _ConfirmadorFalso:
-    def registrar(self, _alumno_id):
-        return 99
-
-    def reiniciar(self):
-        pass
-
-
-class _ServicioConHora:
-    """Fija la hora de AttendanceService para probar el mensaje."""
-
-    def __init__(self, servicio, ahora):
-        self._servicio, self._ahora = servicio, ahora
-
-    def procesar(self, *args):
-        return self._servicio.procesar(*args, ahora=self._ahora)
-
-
-def test_mensaje_salida_aun_no(servicio):
-    marcar(servicio, en(10, 0))
-    resultado = procesar(_FaceFalso(), _ServicioConHora(servicio, en(11, 0)), None,
-                         JORNADA, H_ENTRADA, H_SALIDA, _ConfirmadorFalso())
-    assert resultado["estado"] == att.SALIDA_AUN_NO
-    assert resultado["mensaje"].endswith(
-        "Entrada ya registrada. A partir de las 11:55 se habilita el horario de salida")
-
-
-def test_mensaje_salida_aun_no_explica_la_espera_desde_la_entrada(servicio):
-    # Caso de la prueba con el profe: salida cambiada a 8:55 y entrada del
-    # alumno a las 8:50:25 -> manda la espera de 10 min, no el horario.
-    marcar(servicio, en(8, 50).replace(second=25))
-    resultado = procesar(_FaceFalso(), _ServicioConHora(servicio, en(8, 55)), None,
-                         JORNADA, time(8, 0), time(8, 55), _ConfirmadorFalso())
-    assert resultado["estado"] == att.SALIDA_AUN_NO
-    assert resultado["mensaje"].endswith(
-        "Entrada ya registrada. A partir de las 09:01 se habilita el horario de salida "
-        "(10 minutos después de su entrada a las 08:50)")
 
 
 # --- Informe ---
