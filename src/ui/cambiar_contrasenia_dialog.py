@@ -1,8 +1,9 @@
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QMessageBox, QVBoxLayout
+    QDialog, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
 )
 
-from services.auth_service import ErrorAutenticacion, ReglaDeCuentas
+from services.auth_service import LARGO_MINIMO_CONTRASENIA, ErrorAutenticacion, ReglaDeCuentas
+from ui.componentes import con_rol, etiqueta
 
 
 class CambiarContraseniaDialog(QDialog):
@@ -14,29 +15,40 @@ class CambiarContraseniaDialog(QDialog):
         self._auth = auth_service
         self.sesion = sesion
         self.setWindowTitle("Cambiar contraseña")
+        self.setMinimumWidth(440)
 
         self.actual_input = QLineEdit()
         self.nueva_input = QLineEdit()
         self.repetir_input = QLineEdit()
         for campo in (self.actual_input, self.nueva_input, self.repetir_input):
             campo.setEchoMode(QLineEdit.EchoMode.Password)
+        self.repetir_input.returnPressed.connect(self._confirmar)
 
-        formulario = QFormLayout()
-        formulario.addRow("Contraseña actual:", self.actual_input)
-        formulario.addRow("Nueva contraseña:", self.nueva_input)
-        formulario.addRow("Repetir nueva:", self.repetir_input)
+        cancelar = QPushButton("Cancelar")
+        cancelar.clicked.connect(self.reject)
+        guardar = con_rol(QPushButton("Guardar contraseña"), "primario")
+        guardar.clicked.connect(self._confirmar)
+        botones = QHBoxLayout()
+        botones.setSpacing(12)
+        botones.addWidget(cancelar, 1)
+        botones.addWidget(guardar, 2)
 
-        botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
-                                   | QDialogButtonBox.StandardButton.Cancel)
-        botones.accepted.connect(self._confirmar)
-        botones.rejected.connect(self.reject)
-
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 26, 28, 26)
+        layout.setSpacing(8)
+        layout.addWidget(etiqueta("Cambiar contraseña", "titulo-panel"))
         if obligatorio:
-            layout.addWidget(QLabel("Debe cambiar su contraseña antes de continuar."))
-        layout.addLayout(formulario)
-        layout.addWidget(botones)
-        self.setLayout(layout)
+            layout.addWidget(etiqueta("Es tu primer ingreso: elegí una contraseña nueva para continuar.",
+                                      "secundario"))
+        for texto, campo in (("Contraseña actual", self.actual_input),
+                             (f"Nueva contraseña (mínimo {LARGO_MINIMO_CONTRASENIA} caracteres)",
+                              self.nueva_input),
+                             ("Repetir la nueva contraseña", self.repetir_input)):
+            layout.addSpacing(8)
+            layout.addWidget(etiqueta(texto, "etiqueta"))
+            layout.addWidget(campo)
+        layout.addSpacing(16)
+        layout.addLayout(botones)
 
     def _confirmar(self):
         nueva = self.nueva_input.text()
