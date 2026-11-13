@@ -410,4 +410,5 @@ FABRICAS = {
     "empleados": _por_modulo("ui.empleados_page", "EmpleadosPage"),
     "socios": _por_modulo("ui.socios_page", "SociosPage"),
     "cobros": _por_modulo("ui.cobros_page", "CobrosPage"),
+    "estado": _por_modulo("ui.estado_socio_page", "EstadoSocioPage"),
 }

@@ -148,7 +148,9 @@ def hoja_de_estilos():
     QTableWidget, QTableView {{
         background: transparent; border: none; gridline-color: {BORDE};
         alternate-background-color: #111111;
+        selection-background-color: {FONDOS_AVISO["dorado"]}; selection-color: {TEXTO};
     }}
+    QTableWidget::item:selected {{ background: {FONDOS_AVISO["dorado"]}; color: {DORADO}; }}
     QHeaderView::section {{
         background: {DORADO}; color: {FONDO}; border: none; padding: 10px 12px;
         font-size: 12px; font-weight: 800;
