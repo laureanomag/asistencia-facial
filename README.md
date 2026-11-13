@@ -1,5 +1,7 @@
 # ZebraGym · Control de acceso por reconocimiento facial
 
+**Autora:** Magali Laureano · IES N°7 Populorum Progressio
+
 Aplicación de escritorio (Python 3.12 + PySide6 + PostgreSQL 16) para el
 gimnasio ZebraGym:
 
