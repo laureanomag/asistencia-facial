@@ -14,6 +14,7 @@ import base64
 import json
 import os
 import sys
+import time
 import traceback
 
 SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -70,8 +71,12 @@ def main():
         if not linea:
             continue
         try:
-            respuesta = atender(json.loads(linea), face, control)
+            msg = json.loads(linea)
+            inicio = time.perf_counter()
+            respuesta = atender(msg, face, control)
             if respuesta is not None:
+                print(f"[Reconocimiento] {msg['cmd']} -> {respuesta.get('estado')} en "
+                      f"{time.perf_counter() - inicio:.2f} s", flush=True)
                 responder(respuesta)
         except Exception as error:
             traceback.print_exc()

@@ -18,7 +18,7 @@ Orden de evaluación del socio (el primer motivo que aplica es el que se informa
 El fichaje de empleados no depende del horario de atención.
 """
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 NO_RECONOCIDO = "no_reconocido"
@@ -52,6 +52,9 @@ SALIDA = "SALIDA"
 # Tiempo mínimo entre la entrada y la salida de un fichaje, para que el
 # reconocimiento siguiente no proponga cerrar una entrada recién registrada.
 ESPERA_MINIMA_SALIDA = timedelta(minutes=10)
+
+# Llegar hasta 30 min antes del inicio del turno cuenta como "En horario".
+ANTICIPO_TURNO = timedelta(minutes=30)
 
 DIAS_AVISO_VENCIMIENTO = 5
 ESTADOS_JORNADA = {"licencia_vacaciones": "licencia o vacaciones", "permiso": "permiso"}
@@ -88,6 +91,9 @@ class PropuestaFichaje:
     jornada_id: object = None
     fichaje_id: object = None
     advertencias: tuple = ()
+    turno: object = None    # "14:00–22:00" (turnos de hoy) o None = sin turno hoy
+    estado: str = ""        # "En horario", "Llegaste N min tarde", "Fuera de turno", "Trabajaste ..."
+    en_turno: bool = False  # en su turno, a menos de ANTICIPO_TURNO del inicio o con la llegada marcada
 
 
 # --- Formatos ---
@@ -145,19 +151,19 @@ def evaluar_socio(socio, estado, franjas_hoy, ahora):
     if socio is None:
         return _rechazo(NO_ES_SOCIO, "No figura como socio de ZebraGym.")
     if not socio["activo"]:
-        return _rechazo(SOCIO_INACTIVO, "El socio está dado de baja. Consultá en recepción.")
+        return _rechazo(SOCIO_INACTIVO, "El socio está dado de baja. Consultá en el mostrador.")
     if franja_actual(franjas_hoy, ahora.time()) is None:
         return _rechazo(GIMNASIO_CERRADO, mensaje_cerrado(franjas_hoy))
 
     if estado is None or estado["estado_membresia"] == "sin_membresia":
         return _rechazo(SIN_MEMBRESIA,
-                        "No tiene una membresía. Pasá por recepción para contratar un plan.")
+                        "No tiene una membresía. Pasá por el mostrador para contratar un plan.")
     membresia_id = estado["membresia_id"]
     situacion = estado["estado_membresia"]
     if situacion == "vencida":
         return _rechazo(MEMBRESIA_VENCIDA,
                         f"Su membresía venció el {fecha_texto(estado['fecha_vencimiento'])}. "
-                        "Renovala en recepción.", membresia_id)
+                        "Renovala en el mostrador.", membresia_id)
     if situacion == "no_vigente":
         return _rechazo(MEMBRESIA_NO_VIGENTE,
                         f"Su membresía empieza el {fecha_texto(estado['fecha_inicio'])}.",
@@ -207,39 +213,65 @@ def _advertencias_socio(estado):
 
 # --- Fichaje de empleados ---
 
+def texto_turnos(jornadas_hoy):
+    """'14:00–22:00' (o varios unidos con ' y '), o None si hoy no tiene turno."""
+    turnos = [f"{hora_texto(j.horario_entrada)}–{hora_texto(j.horario_salida)}"
+              for j in jornadas_hoy if j.estado == "jornada"]
+    return " y ".join(turnos) or None
+
+
+def texto_trabajado(desde, hasta):
+    """'Trabajaste 3 h 05 min'."""
+    minutos = max(0, int((hasta - desde).total_seconds() // 60))
+    return f"Trabajaste {minutos // 60} h {minutos % 60:02d} min"
+
+
+def _en_la_jornada(jornada, ahora):
+    inicio = datetime.combine(ahora.date(), jornada.horario_entrada, tzinfo=ahora.tzinfo)
+    fin = datetime.combine(ahora.date(), jornada.horario_salida, tzinfo=ahora.tzinfo)
+    return jornada.estado == "jornada" and inicio - ANTICIPO_TURNO <= ahora < fin, inicio
+
+
 def evaluar_fichaje(fichaje_abierto, jornadas_hoy, ahora):
     """fichaje_abierto: None o (fichaje_id, entrada) con entrada en hora de Argentina.
     jornadas_hoy: jornadas del empleado para la fecha de `ahora`.
     Si hay una entrada abierta se propone la SALIDA; si no, la ENTRADA,
-    vinculada a la jornada cuyo turno contiene la hora actual. Sin jornada
-    o fuera de turno se ficha igual, con jornada_id None."""
+    vinculada a la jornada cuyo turno contiene la hora actual (o empieza en
+    menos de 30 min). Sin jornada o fuera de turno se ficha igual, con
+    jornada_id None: queda como "Fuera de turno"."""
+    turno = texto_turnos(jornadas_hoy)
     if fichaje_abierto is not None:
         fichaje_id, entrada = fichaje_abierto
+        trabajado = texto_trabajado(entrada, ahora)
         if entrada.date() < ahora.date():
             return PropuestaFichaje(
-                True, SALIDA, "Registrar SALIDA.", fichaje_id=fichaje_id,
+                True, SALIDA, "Marcar la salida.", fichaje_id=fichaje_id, turno=turno,
+                estado=trabajado, en_turno=True,
                 advertencias=(f"Tiene una entrada abierta del {fecha_texto(entrada)} "
                               f"a las {hora_texto(entrada)}.",))
         if ahora < entrada + ESPERA_MINIMA_SALIDA:
             return PropuestaFichaje(
-                False, None, f"Ya registraste tu entrada a las {hora_texto(entrada)}.",
-                fichaje_id=fichaje_id)
-        return PropuestaFichaje(True, SALIDA,
-                                f"Registrar SALIDA (entrada a las {hora_texto(entrada)}).",
-                                fichaje_id=fichaje_id)
+                False, None, f"Ya marcaste tu llegada a las {hora_texto(entrada)}.",
+                fichaje_id=fichaje_id, turno=turno,
+                estado=f"Llegada a las {hora_texto(entrada)}", en_turno=True)
+        return PropuestaFichaje(True, SALIDA, f"Marcar la salida (llegada a las {hora_texto(entrada)}).",
+                                fichaje_id=fichaje_id, turno=turno, estado=trabajado, en_turno=True)
 
-    hora = ahora.time()
     for jornada in jornadas_hoy:
-        if jornada.estado == "jornada" and jornada.horario_entrada <= hora < jornada.horario_salida:
+        dentro, inicio = _en_la_jornada(jornada, ahora)
+        if dentro:
+            tarde = int((ahora - inicio).total_seconds() // 60)
+            estado = f"Llegaste {tarde} min tarde" if tarde > 0 else "En horario"
             return PropuestaFichaje(
                 True, ENTRADA,
-                f"Registrar ENTRADA (turno de {hora_texto(jornada.horario_entrada)} "
+                f"Marcar la llegada (turno de {hora_texto(jornada.horario_entrada)} "
                 f"a {hora_texto(jornada.horario_salida)}).",
-                jornada_id=jornada.id)
+                jornada_id=jornada.id, turno=turno, estado=estado, en_turno=True)
 
-    avisos = ["Fichaje fuera de turno"]
+    avisos = []
     for jornada in jornadas_hoy:
         if jornada.estado in ESTADOS_JORNADA:
             avisos.append(f"Hoy figura con {ESTADOS_JORNADA[jornada.estado]}.")
             break
-    return PropuestaFichaje(True, ENTRADA, "Registrar ENTRADA.", advertencias=tuple(avisos))
+    return PropuestaFichaje(True, ENTRADA, "Marcar la llegada.", advertencias=tuple(avisos),
+                            turno=turno, estado="Fuera de turno")

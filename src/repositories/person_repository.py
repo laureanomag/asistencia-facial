@@ -90,6 +90,15 @@ class PersonRepository:
             "roles": list(roles),
         }
 
+    def firma_referencias(self, conn=None):
+        """(cantidad, último id, última modificación) de foto_persona. Cambia
+        cuando se agrega, reemplaza o borra una foto: el reconocimiento la
+        compara para recargar las referencias solo cuando hace falta."""
+        query = "SELECT COUNT(*), COALESCE(MAX(id), 0), MAX(creado_en) FROM foto_persona;"
+        with usar_conexion(conn) as c, c.cursor() as cur:
+            cur.execute(query)
+            return tuple(cur.fetchone())
+
     def obtener_referencias(self, conn=None):
         """Fotos de referencia para el reconocimiento facial:
         (persona_id, apellido, nombre, angulo, imagen).

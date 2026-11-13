@@ -57,6 +57,29 @@ class UserRepository:
             cur.execute(query)
             return cur.fetchall()
 
+    def existe_nombre_usuario(self, nombre_usuario, conn=None):
+        with usar_conexion(conn) as c, c.cursor() as cur:
+            cur.execute("SELECT 1 FROM usuario WHERE LOWER(nombre_usuario) = LOWER(%s);",
+                        (nombre_usuario.strip(),))
+            return cur.fetchone() is not None
+
+    def listar_personal(self, conn=None):
+        """Cuentas del personal (con persona y rol entrenador o recepcionista):
+        (id, nombre, apellido, dni, nombre_usuario, activo, roles, ultimo_acceso)."""
+        query = """
+            SELECT u.id, p.nombre, p.apellido, p.dni, u.nombre_usuario, u.activo,
+                   ARRAY_AGG(ur.rol ORDER BY ur.rol), u.ultimo_acceso
+              FROM usuario u
+              JOIN persona p     ON p.id = u.persona_id
+              JOIN usuario_rol ur ON ur.usuario_id = u.id
+             GROUP BY u.id, p.nombre, p.apellido, p.dni
+            HAVING BOOL_OR(ur.rol IN ('entrenador', 'recepcionista'))
+             ORDER BY u.activo DESC, p.apellido, p.nombre;
+        """
+        with usar_conexion(conn) as c, c.cursor() as cur:
+            cur.execute(query)
+            return [(*fila[:6], list(fila[6]), fila[7]) for fila in cur.fetchall()]
+
     def obtener_roles(self, usuario_id, conn=None):
         """Lista de roles de la cuenta ('administrador', 'recepcionista', 'entrenador')."""
         query = "SELECT rol FROM usuario_rol WHERE usuario_id = %s ORDER BY rol;"

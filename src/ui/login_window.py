@@ -1,5 +1,5 @@
 import psycopg
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
@@ -22,6 +22,11 @@ def pie_login(horario_service):
 
 
 class LoginWindow(QWidget):
+    """Pantalla de ingreso. Con la cuenta validada emite `ingreso(sesion)`;
+    la aplicación (ui/aplicacion.py) abre la ventana principal."""
+
+    ingreso = Signal(object)
+
     def __init__(self, auth_service=None, horario_service=None):
         super().__init__()
         self.setObjectName("Ventana")
@@ -30,7 +35,6 @@ class LoginWindow(QWidget):
             from services.horario_service import HorarioService
             horario_service = HorarioService()
         self._horario = horario_service
-        self.main_window = None
         self.setWindowTitle(f"{tema.NOMBRE_GIMNASIO} — Ingresar")
         self.resize(1280, 800)
 
@@ -136,7 +140,4 @@ class LoginWindow(QWidget):
                 return
             sesion = dialogo.sesion
 
-        from ui.main_window import MainWindow
-        self.main_window = MainWindow(sesion, self._horario)
-        self.main_window.show()
-        self.close()
+        self.ingreso.emit(sesion)

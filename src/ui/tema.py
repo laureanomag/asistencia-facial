@@ -34,7 +34,12 @@ TONOS = {
     "rojo": (ROJO, "rgba(248, 113, 113, 0.12)", "rgba(248, 113, 113, 0.45)"),
     "ambar": (AMBAR, "rgba(251, 191, 36, 0.12)", "rgba(251, 191, 36, 0.45)"),
     "dorado": (DORADO, "rgba(240, 184, 32, 0.10)", "rgba(240, 184, 32, 0.55)"),
+    "neutro": (TEXTO_SECUNDARIO, "rgba(255, 255, 255, 0.06)", "rgba(255, 255, 255, 0.18)"),
 }
+
+# Fondo sólido con tinte para avisos que se dibujan sobre el video
+FONDOS_AVISO = {"rojo": "#2A1414", "verde": "#0E261C", "ambar": "#2A2110", "dorado": "#29220F",
+                "neutro": "#1B1B1B"}
 
 FAMILIA_TITULOS = "Montserrat"
 FAMILIA_TEXTO = "Inter"
@@ -87,6 +92,15 @@ def hoja_de_estilos():
     QFrame[rol="panel"] QLabel {{ background: transparent; border: none; }}
     QFrame#Sidebar {{ background: {PANEL}; border: none; border-right: 1px solid {BORDE}; }}
     QFrame[rol="tarjeta-usuario"] {{ border: 1px solid {BORDE}; border-radius: 12px; }}
+    QFrame[rol="tarjeta-usuario"]:hover {{ border-color: {TEXTO_SECUNDARIO}; background: #1A1A1A; }}
+    QMenu {{
+        background: {PANEL}; border: 1px solid {BORDE}; border-radius: 10px; padding: 6px;
+        color: {TEXTO}; font-size: 14px;
+    }}
+    QMenu::item {{ padding: 9px 18px 9px 12px; border-radius: 6px; }}
+    QMenu::item:selected {{ background: #232323; }}
+    QMenu::icon {{ padding-left: 10px; }}
+    QMenu::separator {{ height: 1px; background: {BORDE}; margin: 5px 8px; }}
     QFrame[rol="separador"] {{ background: {BORDE}; border: none; }}
 
     /* Campos */
@@ -143,6 +157,54 @@ def hoja_de_estilos():
     QScrollBar::handle:vertical {{ background: {BORDE}; border-radius: 5px; min-height: 30px; }}
     QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
     QMessageBox {{ background: {PANEL}; }}
+
+    /* Control de acceso */
+    QLabel[rol="video"] {{ background: #0B0B0B; border-radius: 14px; }}
+    QLabel[rol="chip-camara"] {{
+        background: rgba(0, 0, 0, 0.65); border-radius: 13px; padding: 4px 12px;
+        font-size: 13px; font-weight: 700;
+    }}
+    QPushButton[rol="enlace"] {{
+        background: transparent; border: none; color: {DORADO}; padding: 0;
+        min-height: 24px; font-size: 14px; font-weight: 700; text-align: left;
+    }}
+    QPushButton[rol="enlace"]:hover {{ color: #F5C842; }}
+    QFrame[rol="fila-ingreso"] {{ border: none; border-top: 1px solid {BORDE}; }}
+    QFrame[rol="fila-ingreso"] QLabel {{ background: transparent; }}
+
+    /* Panel y formularios */
+    QLabel[rol="dato-panel"] {{
+        color: {TEXTO_SECUNDARIO}; font-size: 12px; font-weight: 700; letter-spacing: 1px;
+    }}
+    QLabel[rol="numero-panel"] {{ font-family: "{titulos}"; font-size: 30px; font-weight: 800; }}
+    QLabel[rol="error"] {{ color: {ROJO}; font-size: 13px; }}
+    QLabel[rol="ok"] {{ color: {VERDE}; font-size: 13px; }}
+    QLineEdit[error="true"], QComboBox[error="true"] {{ border: 1px solid {ROJO}; }}
+    QComboBox QAbstractItemView {{
+        background: {PANEL}; border: 1px solid {BORDE}; selection-background-color: {DORADO};
+        selection-color: {FONDO};
+    }}
+    QFrame[rol="slot-foto"] {{ background: #0F0F0F; border: 1px solid {BORDE}; border-radius: 12px; }}
+    QFrame[rol="slot-foto"] QLabel {{ background: transparent; border: none; }}
+    QLabel[rol="miniatura"] {{ background: #0B0B0B; border: 1px solid {BORDE}; border-radius: 10px; color: {TEXTO_SECUNDARIO}; }}
+
+    /* Modal de confirmación */
+    QWidget#Velo {{ background: rgba(0, 0, 0, 0.62); }}
+    QFrame[rol="modal"] {{ background: {PANEL}; border: 1px solid {DORADO}; border-radius: 20px; }}
+    QFrame[rol="modal"] QLabel {{ background: transparent; border: none; }}
+    QFrame[rol="tarjeta-dato"] {{ background: #0F0F0F; border: 1px solid {BORDE}; border-radius: 12px; }}
+    QFrame[rol="tarjeta-dato"] QLabel {{ background: transparent; border: none; }}
+    QLabel[rol="dato-titulo"] {{ color: {TEXTO_SECUNDARIO}; font-size: 13px; }}
+    QLabel[rol="dato-valor"] {{ font-size: 16px; font-weight: 700; }}
+    QLabel[rol="dato-valor"][tono="verde"] {{ color: {VERDE}; }}
+    QLabel[rol="dato-valor"][tono="rojo"] {{ color: {ROJO}; }}
+    QLabel[rol="dato-valor"][tono="ambar"] {{ color: {AMBAR}; }}
+    QLabel[rol="nombre-modal"] {{ font-family: "{titulos}"; font-size: 24px; font-weight: 700; }}
+    QLabel[rol="titulo-modal"] {{ font-family: "{titulos}"; font-size: 21px; font-weight: 800; }}
+    QFrame[rol="modal"] QLabel[rol="avatar-grande"] {{
+        background: #222222; color: {DORADO}; border: 2px solid {DORADO}; border-radius: 37px;
+        font-family: "{titulos}"; font-size: 24px; font-weight: 800;
+    }}
     """]
     for tono, (color, fondo, borde) in TONOS.items():
         reglas.append(f"""
@@ -155,7 +217,16 @@ def hoja_de_estilos():
     }}
     QFrame[rol="indicador"][tono="{tono}"] QLabel {{
         color: {color}; background: transparent; font-size: 14px; font-weight: 700;
-    }}""")
+    }}
+    QFrame[rol="camara"][tono="{tono}"] {{
+        background: {PANEL}; border: 2px solid {color}; border-radius: 16px;
+    }}
+    QLabel[rol="chip-camara"][tono="{tono}"] {{ color: {color}; border: 1px solid {borde}; }}
+    QFrame[rol="aviso"][tono="{tono}"] {{
+        background: {FONDOS_AVISO[tono]}; border: 1px solid {borde}; border-radius: 14px;
+    }}
+    QFrame[rol="aviso"][tono="{tono}"] QLabel {{ background: transparent; border: none; }}
+    QFrame[rol="aviso"][tono="{tono}"] QLabel[rol="aviso-icono"] {{ color: {color}; font-size: 22px; }}""")
     return "\n".join(reglas)
 
 

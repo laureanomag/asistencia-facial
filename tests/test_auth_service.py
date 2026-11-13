@@ -214,13 +214,13 @@ MATRIZ_ESPERADA = {
     "usuario.administrar": "A",
     "configuracion.gestionar": "A",
     "jornada.gestionar": "A",
-    "socio.registrar": "ARE",
-    "socio.editar": "ARE",
+    "socio.registrar": "RE",
+    "socio.editar": "RE",
     "socio.baja_reactivar": "A",
     "membresia.consultar": "ARE",
-    "pago.registrar": "AR",
-    "membresia.renovar": "AR",
-    "acceso.operar_camara": "ARE",
+    "pago.registrar": "RE",
+    "membresia.renovar": "RE",
+    "acceso.operar_camara": "RE",
     "plan_entrenamiento.gestionar": "AE",
     "reporte.consultar": "A",
     "fichaje.consultar_propio": "ARE",
@@ -245,10 +245,15 @@ def test_recepcionista_no_administra_ni_configura():
         autorizar(recepcion, permiso)
 
 
-def test_entrenador_no_registra_pagos_ni_renovaciones():
+def test_entrenador_atiende_el_mostrador():
+    # ZebraGym hoy no tiene recepcionista: el entrenador registra socios, cobra,
+    # renueva y opera la cámara, pero no administra.
     entrenador = _sesion(ENTRENADOR)
-    assert entrenador.puede("socio.registrar") and entrenador.puede("acceso.operar_camara")
-    assert not entrenador.puede("pago.registrar") and not entrenador.puede("membresia.renovar")
+    for permiso in ("socio.registrar", "socio.editar", "pago.registrar", "membresia.renovar",
+                    "acceso.operar_camara", "plan_entrenamiento.gestionar"):
+        assert entrenador.puede(permiso)
+    for permiso in ("usuario.administrar", "socio.baja_reactivar", "reporte.consultar"):
+        assert not entrenador.puede(permiso)
 
 
 def test_varios_roles_suman_permisos():

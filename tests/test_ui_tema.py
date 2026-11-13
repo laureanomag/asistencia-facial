@@ -60,19 +60,23 @@ def test_hoja_de_estilos_usa_la_paleta(app):
 @pytest.mark.parametrize("roles, esperado", [
     ({RECEPCIONISTA}, ["Control de acceso", "Socios", "Cobros y renovaciones", "Estado del socio",
                        "Fichajes"]),
-    ({ENTRENADOR}, ["Control de acceso", "Socios", "Estado del socio", "Fichajes"]),
-    ({ADMINISTRADOR}, ["Control de acceso", "Socios", "Cobros y renovaciones", "Estado del socio",
-                       "Fichajes", "Jornadas", "Informes", "Configuración"]),
+    ({ENTRENADOR}, ["Control de acceso", "Socios", "Cobros y renovaciones", "Estado del socio",
+                    "Fichajes"]),
+    ({ADMINISTRADOR}, ["Panel", "Informes", "Estado del socio", "Empleados", "Jornadas", "Fichajes",
+                       "Configuración"]),
+    ({ADMINISTRADOR, ENTRENADOR}, ["Panel", "Informes", "Estado del socio", "Empleados", "Jornadas",
+                                   "Fichajes", "Configuración", "Control de acceso", "Socios",
+                                   "Cobros y renovaciones"]),
 ])
 def test_menu_segun_permisos(app, roles, esperado):
     from ui.main_window import MainWindow
-    ventana = MainWindow(_sesion(*roles), _HorarioFalso())
+    ventana = MainWindow(_sesion(*roles), _HorarioFalso(), fabricas={})
     assert _menu(ventana) == esperado
 
 
 def test_encabezado_con_reloj_y_estado(app):
     from ui.main_window import MainWindow
-    ventana = MainWindow(_sesion(RECEPCIONISTA), _HorarioFalso())
+    ventana = MainWindow(_sesion(RECEPCIONISTA), _HorarioFalso(), fabricas={})
     assert ventana.encabezado.titulo.text() == "Control de acceso"
     assert ventana.encabezado.subtitulo.text() == "Jueves 12/11 · 18:42 · Mirá a la cámara para ingresar"
     assert ventana.indicador.texto() == "Abierto · cierra a las 23:00"
@@ -84,7 +88,7 @@ def test_encabezado_con_reloj_y_estado(app):
 
 def test_sin_base_de_datos_la_ventana_igual_abre(app):
     from ui.main_window import MainWindow
-    ventana = MainWindow(_sesion(ADMINISTRADOR), _HorarioFalso(falla=True))
+    ventana = MainWindow(_sesion(ADMINISTRADOR), _HorarioFalso(falla=True), fabricas={})
     assert ventana.indicador.texto() == "Sin conexión con la base de datos"
     assert ventana.indicador.property("tono") == "rojo"
 
@@ -106,6 +110,42 @@ def test_iniciales(nombre, esperado):
 
 def test_textos_sin_vocabulario_de_alumnos(app):
     from ui import main_window
-    textos = " ".join(f"{s.menu} {s.titulo} {s.subtitulo}" for s in main_window.SECCIONES).lower()
+    textos = " ".join(f"{s.menu} {s.titulo} {s.subtitulo}" for s in main_window.SECCIONES.values()).lower()
     for palabra in ("alumno", "cátedra", "catedra", "profesor"):
         assert palabra not in textos
+
+
+def test_administrador_empieza_en_el_panel_sin_camara(app):
+    from PySide6.QtWidgets import QLabel
+    from ui.main_window import MainWindow
+    creadas = []
+    fabricas = {"acceso": lambda v: creadas.append("camara") or QLabel("cámara"),
+                "panel": lambda v: QLabel("panel")}
+    ventana = MainWindow(_sesion(ADMINISTRADOR), _HorarioFalso(), fabricas=fabricas)
+    assert ventana.encabezado.titulo.text() == "Panel"
+    assert "acceso" not in ventana.paginas and creadas == []      # la cámara no se inicia
+
+
+def test_pantalla_que_falla_no_cierra_la_app(app):
+    from ui.main_window import MainWindow, PaginaConError
+
+    def falla(ventana):
+        raise ConnectionError("sin base de datos")
+    ventana = MainWindow(_sesion(ADMINISTRADOR), _HorarioFalso(), fabricas={"panel": falla})
+    assert isinstance(ventana.paginas["panel"], PaginaConError)
+
+
+def test_modulo_todavia_inexistente_queda_pendiente(app):
+    from ui.main_window import MainWindow, PaginaPendiente, _por_modulo
+    ventana = MainWindow(_sesion(ADMINISTRADOR), _HorarioFalso(),
+                         fabricas={"panel": _por_modulo("ui.no_existe", "Nada")})
+    assert "panel" not in ventana.paginas
+    assert isinstance(ventana.stack.widget(0), PaginaPendiente)
+
+
+def test_mensajes_de_error_en_espanol():
+    import psycopg
+    from main import mensaje_de_error
+    assert mensaje_de_error(psycopg.OperationalError, "timeout").startswith(
+        "No se pudo comunicar con la base de datos")
+    assert mensaje_de_error(ValueError, "x").startswith("Ocurrió un error inesperado. La aplicación sigue")

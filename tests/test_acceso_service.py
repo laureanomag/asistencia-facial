@@ -8,7 +8,8 @@ import pytest
 from services import reglas_ingreso as r
 from services.acceso_service import (
     AVISO, ENTRENAR, FICHAR, PROPUESTA, RECHAZADO, AccesoService, Antirrebote,
-    ContadorNoReconocidos, GestorPropuestas, dni_texto, tarjetas_socio,
+    MODO_AMBOS, MODO_EMPLEADO, MODO_SOCIO, ContadorNoReconocidos, GestorPropuestas, dni_texto,
+    tarjetas_socio,
 )
 
 JUEVES = datetime(2026, 11, 12, 18, 42)
@@ -113,11 +114,12 @@ class _SociosDe:
 def test_socio_habilitado_propone_ingreso_sin_escribir():
     m = Mundo()
     ev = servicio(m).evaluar(1, Decimal("0.18"))
-    assert ev.estado == PROPUESTA and [o.clave for o in ev.opciones] == [ENTRENAR]
-    assert ev.opciones[0].operacion == "registrar ingreso"
+    assert ev.estado == PROPUESTA and ev.modo == MODO_SOCIO
+    assert [(o.clave, o.boton) for o in ev.opciones] == [(ENTRENAR, "Entrar")]
+    assert ev.mensaje == "¿Confirmás tu entrada al gimnasio?" and ev.sugerida == ENTRENAR
     assert (ev.nombre, ev.dni, ev.rol_texto) == ("Juan Pérez", "30.111.222", "Socio")
-    assert ev.tarjetas == (("Plan", "3 veces por semana", None), ("Esta semana", "2 de 3 días", None),
-                           ("Vence", "05/12 · en 23 días", None), ("Estado contable", "Al día", "verde"))
+    assert ev.tarjetas == (("Plan", "3 veces por semana", None), ("Vence", "05/12 · en 23 días", None),
+                           ("Estado contable", "Al día", "verde"))
     assert (m.rechazos, m.permitidos) == ([], [])
 
 
@@ -158,38 +160,105 @@ def test_referencia_de_una_persona_que_ya_no_existe():
 def test_pago_parcial_permite_y_advierte():
     m = Mundo(estado_socio=estado(saldo=Decimal("8000"), estado_contable="debe"))
     ev = servicio(m).evaluar(1)
-    assert ev.estado == PROPUESTA and "Debe $8.000,00" in ev.advertencias
-    assert ev.tarjetas[3] == ("Estado contable", "Debe $8.000,00", "rojo")
+    assert ev.estado == PROPUESTA and ev.advertencias == ()      # la deuda ya está en la tarjeta
+    assert ev.tarjetas[2] == ("Estado contable", "Debe $8.000,00", "rojo")
 
 
-def test_socio_y_entrenador_elige_entrenar_o_fichar():
-    m = Mundo(empleado=True)
+TURNO_TARDE = (1, time(14, 0), time(22, 0), "jornada")
+
+
+def test_socio_y_entrenador_en_su_turno_sugiere_trabajar():
+    m = Mundo(empleado=True, jornadas=[TURNO_TARDE])
     ev = servicio(m).evaluar(1)
-    assert [o.clave for o in ev.opciones] == [ENTRENAR, FICHAR]
-    assert ev.rol_texto == "Socio y entrenador"
-    assert ev.mensaje == "Elegí si venís a entrenar o a fichar tu jornada."
-    assert ev.opciones[1].operacion == "registrar entrada"
+    assert (ev.modo, ev.mensaje, ev.rol_texto) == (MODO_AMBOS, "¿Qué vas a hacer?", "Socio y entrenador")
+    assert [(o.clave, o.boton, o.habilitada) for o in ev.opciones] == [
+        (FICHAR, "Trabajar", True), (ENTRENAR, "Entrenar", True)]
+    assert ev.sugerida == FICHAR
+    assert ev.lineas == (("Empleado · Turno 14:00–22:00 · Llegaste 282 min tarde", "ambar"),
+                         ("Socio · 3 veces por semana · Vigente (vence 05/12)", "verde"))
 
 
-def test_socio_vencido_que_es_entrenador_solo_puede_fichar():
-    m = Mundo(empleado=True, estado_socio=estado(estado_membresia="vencida"))
+def test_socio_y_entrenador_media_hora_antes_del_turno_sugiere_trabajar():
+    m = Mundo(empleado=True, jornadas=[TURNO_TARDE])
+    ev = servicio(m, ahora=JUEVES.replace(hour=13, minute=35)).evaluar(1)
+    assert ev.sugerida == FICHAR
+    assert ev.lineas[0] == ("Empleado · Turno 14:00–22:00 · En horario", "verde")
+
+
+def test_socio_y_entrenador_fuera_de_turno_sugiere_entrenar():
+    m = Mundo(empleado=True, jornadas=[(1, time(7, 0), time(15, 0), "jornada")])
     ev = servicio(m).evaluar(1)
-    assert [o.clave for o in ev.opciones] == [FICHAR]
-    assert "venció" in ev.aviso_socio
+    assert ev.sugerida == ENTRENAR
+    assert ev.lineas[0] == ("Empleado · Turno 07:00–15:00 · Fuera de turno", "ambar")
+    ev = servicio(Mundo(empleado=True)).evaluar(1)
+    assert (ev.sugerida, ev.lineas[0]) == (ENTRENAR, ("Empleado · Sin turno hoy", "ambar"))
+
+
+def test_con_la_llegada_marcada_sugiere_trabajar_para_salir():
+    m = Mundo(empleado=True, abierto=(40, JUEVES - timedelta(hours=4, minutes=40)))
+    ev = servicio(m).evaluar(1)
+    assert [o.boton for o in ev.opciones] == ["Me voy", "Entrenar"] and ev.sugerida == FICHAR
+    assert ev.lineas[0] == ("Empleado · Sin turno hoy · Trabajaste 4 h 40 min", "neutro")
+
+
+@pytest.mark.parametrize("situacion, texto", [
+    ("vencida", "Socio · 3 veces por semana · Vencida"),
+    ("sin_membresia", "Socio · Sin membresía"),
+])
+def test_socio_sin_membresia_vigente_que_es_entrenador(situacion, texto):
+    m = Mundo(empleado=True, estado_socio=estado(estado_membresia=situacion))
+    ev = servicio(m).evaluar(1)
+    entrenar = ev.opciones[1]
+    assert (entrenar.clave, entrenar.habilitada) == (ENTRENAR, False) and entrenar.motivo
+    assert ev.sugerida == FICHAR and ev.lineas[1] == (texto, "rojo")
     assert m.rechazos == []                      # vino a trabajar: no es un rechazo
+    with pytest.raises(ValueError):              # una opción deshabilitada no se confirma
+        servicio(m).confirmar(ev, ENTRENAR)
 
 
-def test_empleado_ficha_con_el_gimnasio_cerrado():
+def test_entrada_reciente_deja_trabajar_deshabilitado_y_sugiere_entrenar():
+    m = Mundo(empleado=True, abierto=(40, JUEVES - timedelta(minutes=3)))
+    ev = servicio(m).evaluar(1)
+    trabajar = ev.opciones[0]
+    assert (trabajar.habilitada, trabajar.motivo) == (False, "Ya marcaste tu llegada a las 18:39.")
+    assert ev.sugerida == ENTRENAR
+
+
+def test_empleado_solo_ve_su_asistencia_laboral():
+    m = Mundo(socio=False, empleado=True, jornadas=[TURNO_TARDE])
+    ev = servicio(m, ahora=JUEVES.replace(hour=14, minute=0)).evaluar(1)
+    assert (ev.modo, ev.mensaje) == (MODO_EMPLEADO, "Asistencia laboral")
+    assert [(o.clave, o.boton) for o in ev.opciones] == [(FICHAR, "Llegué")]
+    assert ev.tarjetas == (("Rol", "Entrenador", None), ("Turno de hoy", "14:00–22:00", None),
+                           ("Hora", "14:00", None), ("Estado", "En horario", "verde"))
+
+
+def test_empleado_al_irse_ve_lo_trabajado():
+    m = Mundo(socio=False, empleado=True, jornadas=[TURNO_TARDE],
+              abierto=(40, JUEVES.replace(hour=14, minute=2)))
+    ev = servicio(m, ahora=JUEVES.replace(hour=22, minute=7)).evaluar(1)
+    assert [o.boton for o in ev.opciones] == ["Me voy"]
+    assert ev.tarjetas[3] == ("Estado", "Trabajaste 8 h 05 min", None)
+
+
+def test_empleado_ficha_con_el_gimnasio_cerrado_y_sin_turno():
     m = Mundo(socio=False, empleado=True)
     ev = servicio(m, ahora=JUEVES.replace(hour=6, minute=50)).evaluar(1)
     assert ev.estado == PROPUESTA and [o.clave for o in ev.opciones] == [FICHAR]
-    assert ev.advertencias == ("Fichaje fuera de turno",)
+    assert ev.tarjetas[1:] == (("Turno de hoy", "Sin turno hoy", None), ("Hora", "06:50", None),
+                               ("Estado", "Fuera de turno", "ambar"))
+
+
+def test_socio_dado_de_baja_que_es_entrenador_solo_ficha():
+    m = Mundo(empleado=True, socio_activo=False)
+    ev = servicio(m).evaluar(1)
+    assert ev.modo == MODO_EMPLEADO and m.rechazos == []
 
 
 def test_empleado_con_entrada_reciente_solo_recibe_un_aviso():
     m = Mundo(socio=False, empleado=True, abierto=(40, JUEVES - timedelta(minutes=3)))
     ev = servicio(m).evaluar(1)
-    assert (ev.estado, ev.mensaje) == (AVISO, "Ya registraste tu entrada a las 18:39.")
+    assert (ev.estado, ev.mensaje) == (AVISO, "Ya marcaste tu llegada a las 18:39.")
     assert m.rechazos == []
 
 
@@ -206,7 +275,7 @@ def test_confirmar_ingreso():
     s = servicio(m)
     resultado = s.confirmar(s.evaluar(1, Decimal("0.18")), ENTRENAR)
     assert resultado.registrado and resultado.tono == "verde"
-    assert resultado.mensaje == "Ingreso registrado a las 18:42. ¡Buen entrenamiento, Juan!"
+    assert resultado.mensaje == "¡Listo, Juan! Buen entrenamiento."
     assert m.permitidos == [(50, 7, Decimal("0.18"))]
 
 
@@ -230,16 +299,17 @@ def test_confirmar_fichaje_entrada_y_salida():
     turno = (1, time(7, 30), time(23, 0), "jornada")
     m = Mundo(socio=False, empleado=True, jornadas=[turno])
     s = servicio(m)
-    assert s.confirmar(s.evaluar(1), FICHAR).mensaje == "Entrada registrada a las 18:42."
+    assert s.confirmar(s.evaluar(1), FICHAR).mensaje == "Llegada marcada a las 18:42."
     assert m.entradas == [(80, 1)]
 
-    m.jornadas = []
-    assert s.confirmar(s.evaluar(1), FICHAR).mensaje == "Entrada registrada a las 18:42 (fuera de turno)."
+    m.jornadas = []                               # fuera de turno: se marca igual, sin jornada
+    assert s.confirmar(s.evaluar(1), FICHAR).mensaje == "Llegada marcada a las 18:42."
+    assert m.entradas[-1] == (80, None)
 
     m.abierto = (40, JUEVES - timedelta(hours=8))
     ev = s.evaluar(1)
-    assert ev.opciones[0].operacion == "registrar salida"
-    assert s.confirmar(ev, FICHAR).mensaje == "Salida registrada a las 18:42."
+    assert ev.opciones[0].boton == "Me voy"
+    assert s.confirmar(ev, FICHAR).mensaje == "Salida marcada a las 18:42."
     assert m.salidas == [40]
 
 
@@ -296,5 +366,5 @@ def test_formatos():
     assert dni_texto("30111222") == "30.111.222" and dni_texto("1234567") == "1.234.567"
     assert tarjetas_socio(estado(max_dias_semanales=None, dias_entrenados_semana=1,
                                  dias_para_vencer=1, estado_contable="por_vencer"))[1:] == (
-        ("Esta semana", "1 día", None), ("Vence", "05/12 · mañana", None),
+        ("Vence", "05/12 · mañana", None),
         ("Estado contable", "Por vencer", "ambar"))

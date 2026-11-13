@@ -192,21 +192,39 @@ TURNO_MANANA = Jornada(1, time(7, 0), time(15, 0), "jornada")
 def test_entrada_dentro_del_turno():
     p = evaluar_fichaje(None, [TURNO_MANANA], JUEVES.replace(hour=7, minute=0))
     assert (p.permitido, p.operacion, p.jornada_id, p.advertencias) == (True, r.ENTRADA, 1, ())
+    assert (p.turno, p.estado, p.en_turno) == ("07:00–15:00", "En horario", True)
 
 
-@pytest.mark.parametrize("hora", [time(6, 50), time(15, 0), time(20, 0)])
+def test_hasta_30_min_antes_del_turno_es_en_horario():
+    p = evaluar_fichaje(None, [TURNO_MANANA], JUEVES.replace(hour=6, minute=30))
+    assert (p.jornada_id, p.estado, p.en_turno) == (1, "En horario", True)
+
+
+def test_llegada_tarde_cuenta_los_minutos():
+    p = evaluar_fichaje(None, [TURNO_MANANA], JUEVES.replace(hour=7, minute=12, second=40))
+    assert (p.jornada_id, p.estado) == (1, "Llegaste 12 min tarde")
+
+
+@pytest.mark.parametrize("hora", [time(6, 29), time(15, 0), time(20, 0)])
 def test_entrada_fuera_de_turno(hora):
     p = evaluar_fichaje(None, [TURNO_MANANA], datetime.combine(JUEVES.date(), hora))
-    assert (p.operacion, p.jornada_id) == (r.ENTRADA, None)
-    assert p.advertencias == ("Fichaje fuera de turno",)
+    assert (p.permitido, p.operacion, p.jornada_id) == (True, r.ENTRADA, None)
+    assert (p.turno, p.estado, p.en_turno) == ("07:00–15:00", "Fuera de turno", False)
 
 
 def test_entrada_sin_jornada_y_con_licencia():
-    assert evaluar_fichaje(None, [], JUEVES).advertencias == ("Fichaje fuera de turno",)
+    p = evaluar_fichaje(None, [], JUEVES)
+    assert (p.turno, p.estado, p.advertencias) == (None, "Fuera de turno", ())
     licencia = Jornada(2, time(7, 0), time(15, 0), "licencia_vacaciones")
     p = evaluar_fichaje(None, [licencia], JUEVES.replace(hour=8))
-    assert p.jornada_id is None
-    assert p.advertencias == ("Fichaje fuera de turno", "Hoy figura con licencia o vacaciones.")
+    assert (p.jornada_id, p.turno) == (None, None)
+    assert p.advertencias == ("Hoy figura con licencia o vacaciones.",)
+
+
+def test_varios_turnos_en_el_dia():
+    tarde = Jornada(3, time(18, 0), time(22, 0), "jornada")
+    p = evaluar_fichaje(None, [TURNO_MANANA, tarde], JUEVES.replace(hour=17, minute=45))
+    assert (p.jornada_id, p.turno, p.estado) == (3, "07:00–15:00 y 18:00–22:00", "En horario")
 
 
 def test_fichaje_no_depende_del_horario_de_atencion():
@@ -218,14 +236,15 @@ def test_salida_con_entrada_abierta():
     entrada = JUEVES.replace(hour=7, minute=5)
     p = evaluar_fichaje((40, entrada), [TURNO_MANANA], JUEVES.replace(hour=15, minute=2))
     assert (p.permitido, p.operacion, p.fichaje_id) == (True, r.SALIDA, 40)
-    assert p.mensaje == "Registrar SALIDA (entrada a las 07:05)."
+    assert p.mensaje == "Marcar la salida (llegada a las 07:05)."
+    assert (p.estado, p.en_turno) == ("Trabajaste 7 h 57 min", True)
 
 
 def test_salida_todavia_no_habilitada():
     entrada = JUEVES.replace(hour=7, minute=5)
     p = evaluar_fichaje((40, entrada), [], entrada + timedelta(minutes=9, seconds=59))
     assert (p.permitido, p.operacion) == (False, None)
-    assert p.mensaje == "Ya registraste tu entrada a las 07:05."
+    assert p.mensaje == "Ya marcaste tu llegada a las 07:05."
     assert evaluar_fichaje((40, entrada), [], entrada + r.ESPERA_MINIMA_SALIDA).operacion == r.SALIDA
 
 

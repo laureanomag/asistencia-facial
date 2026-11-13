@@ -34,8 +34,17 @@ AVISO = "AVISO"             # nada para hacer (p. ej., entrada recién fichada);
 
 ANTIRREBOTE_S = 10.0
 INTENTOS_NO_RECONOCIDO = 3
-VIGENCIA_PROPUESTA_S = 35.0          # el modal se cancela solo a los 30 s
+VIGENCIA_PROPUESTA_S = 65.0          # el modal se cancela solo a los 60 s
 ROLES_QUE_FICHAN = {"entrenador", "recepcionista"}
+
+# Qué modal se abre según quién es la persona reconocida
+MODO_SOCIO = "socio"          # solo valida su identidad para entrar
+MODO_EMPLEADO = "empleado"    # asistencia laboral
+MODO_AMBOS = "ambos"          # socio y empleado: elige Trabajar o Entrenar
+
+SITUACION_MEMBRESIA = {"vigente": "Vigente", "por_vencer": "Vigente", "vencida": "Vencida",
+                       "sin_membresia": "Sin membresía", "no_vigente": "Todavía no vigente",
+                       "agotada": "Cupo agotado"}
 
 
 def dni_texto(dni):
@@ -48,9 +57,10 @@ def dni_texto(dni):
 
 @dataclass(frozen=True)
 class Opcion:
-    clave: str        # ENTRENAR o FICHAR
-    boton: str        # texto del botón del modal
-    operacion: str    # "registrar ingreso", "registrar entrada", "registrar salida"
+    clave: str               # ENTRENAR o FICHAR
+    boton: str               # texto corto del botón: Entrar, Llegué, Me voy, Trabajar, Entrenar
+    habilitada: bool = True
+    motivo: object = None    # por qué está deshabilitada
 
 
 @dataclass
@@ -62,10 +72,12 @@ class Evaluacion:
     dni: str = ""
     rol_texto: str = ""
     motivo: object = None
+    modo: object = None           # MODO_SOCIO, MODO_EMPLEADO o MODO_AMBOS (solo en PROPUESTA)
     opciones: tuple = ()
+    sugerida: object = None       # clave de la opción más probable (botón dorado)
     advertencias: tuple = ()
     tarjetas: tuple = ()          # ((titulo, valor, tono), ...) para el modal
-    aviso_socio: object = None    # por qué no puede entrenar, si igual puede fichar
+    lineas: tuple = ()            # ((texto, tono), ...) una por condición (MODO_AMBOS)
     socio_id: object = None
     membresia_id: object = None
     usuario_id: object = None
@@ -76,6 +88,7 @@ class Evaluacion:
         datos["opciones"] = [asdict(o) for o in self.opciones]
         datos["advertencias"] = list(self.advertencias)
         datos["tarjetas"] = [list(t) for t in self.tarjetas]
+        datos["lineas"] = [list(t) for t in self.lineas]
         if datos["distancia"] is not None:
             datos["distancia"] = float(datos["distancia"])
         return datos
@@ -91,13 +104,7 @@ class Confirmacion:
 
 
 def tarjetas_socio(estado):
-    """Plan / Esta semana / Vence / Estado contable, como en el diseño del modal."""
-    dias = estado["dias_entrenados_semana"]
-    maximo = estado["max_dias_semanales"]
-    if maximo:
-        semana = f"{dias} de {maximo} días"
-    else:
-        semana = "1 día" if dias == 1 else f"{dias} días"
+    """Plan / Vence / Estado contable."""
     restantes = estado["dias_para_vencer"]
     cuando = "mañana" if restantes == 1 else f"en {restantes} días"
     vence = f"{estado['fecha_vencimiento'].strftime('%d/%m')} · {cuando}"
@@ -108,8 +115,53 @@ def tarjetas_socio(estado):
         contable = ("Por vencer", "ambar")
     else:
         contable = ("Al día", "verde")
-    return (("Plan", estado["plan"], None), ("Esta semana", semana, None),
-            ("Vence", vence, None), ("Estado contable", contable[0], contable[1]))
+    return (("Plan", estado["plan"], None), ("Vence", vence, None),
+            ("Estado contable", contable[0], contable[1]))
+
+
+def tono_laboral(estado):
+    if estado == "En horario":
+        return "verde"
+    if estado.startswith("Llegaste") or estado == "Fuera de turno":
+        return "ambar"
+    return None
+
+
+def tarjetas_empleado(rol, fichaje, ahora):
+    """Rol / Turno de hoy / Hora / Estado (asistencia laboral)."""
+    return (("Rol", rol, None), ("Turno de hoy", fichaje.turno or "Sin turno hoy", None),
+            ("Hora", hora_texto(ahora), None),
+            ("Estado", fichaje.estado, tono_laboral(fichaje.estado)))
+
+
+def linea_empleado(fichaje):
+    """'Empleado · Turno 14:00–22:00 · En horario' o 'Empleado · Sin turno hoy'."""
+    partes = ["Empleado", f"Turno {fichaje.turno}" if fichaje.turno else "Sin turno hoy"]
+    if fichaje.turno or fichaje.estado != "Fuera de turno":
+        partes.append(fichaje.estado)
+    return " · ".join(partes), tono_laboral(fichaje.estado) or "neutro"
+
+
+def linea_socio(estado):
+    """'Socio · Pase libre · Vigente (vence 05/12)', 'Socio · Vencida', 'Socio · Sin membresía'."""
+    situacion = (estado or {}).get("estado_membresia") or "sin_membresia"
+    texto = SITUACION_MEMBRESIA.get(situacion, "Sin membresía")
+    if texto == "Vigente":
+        texto = f"Vigente (vence {estado['fecha_vencimiento'].strftime('%d/%m')})"
+    partes = ["Socio"]
+    if situacion != "sin_membresia" and estado.get("plan"):
+        partes.append(estado["plan"])
+    partes.append(texto)
+    return " · ".join(partes), "verde" if texto.startswith("Vigente") else "rojo"
+
+
+def _rol_empleado(roles):
+    return "Entrenador" if "entrenador" in roles else "Recepcionista"
+
+
+def _sin_repetir_tarjetas(advertencias):
+    """El vencimiento y la deuda ya están en las tarjetas del modal."""
+    return tuple(a for a in advertencias if not a.startswith(("Debe", "Vence")))
 
 
 def _rol_texto(es_socio, es_empleado, roles):
@@ -117,7 +169,7 @@ def _rol_texto(es_socio, es_empleado, roles):
     if es_socio:
         partes.append("Socio")
     if es_empleado:
-        partes.append("Entrenador" if "entrenador" in roles else "Recepcionista")
+        partes.append(_rol_empleado(roles))
     return " y ".join(partes) if len(partes) < 2 else f"{partes[0]} y {partes[1].lower()}"
 
 
@@ -171,28 +223,9 @@ class AccesoService:
             base["rol_texto"] = _rol_texto(decision is not None, fichaje is not None,
                                            set(roles["roles"]))
 
-            opciones, advertencias, tarjetas = [], [], ()
-            if decision is not None and decision.permitido:
-                opciones.append(Opcion(ENTRENAR, "Entrenar", "registrar ingreso"))
-                advertencias.extend(decision.advertencias)
-                tarjetas = tarjetas_socio(estado)
-            if fichaje is not None and fichaje.permitido:
-                operacion = "registrar entrada" if fichaje.operacion == reglas.ENTRADA else "registrar salida"
-                opciones.append(Opcion(FICHAR, "Fichar", operacion))
-                advertencias.extend(fichaje.advertencias)
-
-            if opciones:
-                if len(opciones) == 1 and opciones[0].clave == ENTRENAR:
-                    mensaje = decision.mensaje
-                elif len(opciones) == 1:
-                    mensaje = fichaje.mensaje
-                else:
-                    mensaje = "Elegí si venís a entrenar o a fichar tu jornada."
-                aviso = decision.mensaje if decision is not None and not decision.permitido else None
-                return Evaluacion(PROPUESTA, mensaje, opciones=tuple(opciones),
-                                  advertencias=tuple(advertencias), tarjetas=tarjetas,
-                                  aviso_socio=aviso,
-                                  membresia_id=decision.membresia_id if decision else None, **base)
+            propuesta = self._propuesta(decision, estado, fichaje, set(roles["roles"]), ahora, base)
+            if propuesta is not None:
+                return propuesta
 
             if decision is not None:
                 self._accesos.registrar_rechazo(decision.motivo, roles["socio_id"],
@@ -204,6 +237,42 @@ class AccesoService:
             self._accesos.registrar_rechazo(reglas.NO_ES_SOCIO, distancia_facial=distancia, conn=conn)
             return Evaluacion(RECHAZADO, "No figura como socio de ZebraGym.",
                               motivo=reglas.NO_ES_SOCIO, **base)
+
+    @staticmethod
+    def _propuesta(decision, estado, fichaje, roles, ahora, base):
+        """La PROPUESTA para el modal según quién es la persona, o None si no
+        tiene ninguna opción habilitada (entonces se rechaza o se avisa)."""
+        puede_entrenar = decision is not None and decision.permitido
+        puede_fichar = fichaje is not None and fichaje.permitido
+        socio_activo = decision is not None and decision.motivo != reglas.SOCIO_INACTIVO
+        membresia_id = decision.membresia_id if decision else None
+
+        if socio_activo and fichaje is not None and (puede_entrenar or puede_fichar):
+            trabajar = Opcion(FICHAR, "Me voy" if fichaje.operacion == reglas.SALIDA else "Trabajar",
+                              puede_fichar, None if puede_fichar else fichaje.mensaje)
+            entrenar = Opcion(ENTRENAR, "Entrenar", puede_entrenar,
+                              None if puede_entrenar else decision.mensaje)
+            # Dorado: Trabajar si está en su turno, a menos de 30 min o con la llegada marcada.
+            sugerida = FICHAR if puede_fichar and (fichaje.en_turno or not puede_entrenar) else ENTRENAR
+            avisos = (_sin_repetir_tarjetas(decision.advertencias) if puede_entrenar else ()) + \
+                (fichaje.advertencias if puede_fichar else ())
+            return Evaluacion(PROPUESTA, "¿Qué vas a hacer?", modo=MODO_AMBOS,
+                              opciones=(trabajar, entrenar), sugerida=sugerida, advertencias=avisos,
+                              lineas=(linea_empleado(fichaje), linea_socio(estado)),
+                              membresia_id=membresia_id, **base)
+        if puede_entrenar and fichaje is None:
+            return Evaluacion(PROPUESTA, "¿Confirmás tu entrada al gimnasio?", modo=MODO_SOCIO,
+                              opciones=(Opcion(ENTRENAR, "Entrar"),), sugerida=ENTRENAR,
+                              advertencias=_sin_repetir_tarjetas(decision.advertencias),
+                              tarjetas=tarjetas_socio(estado), membresia_id=membresia_id, **base)
+        if puede_fichar:
+            boton = "Me voy" if fichaje.operacion == reglas.SALIDA else "Llegué"
+            return Evaluacion(PROPUESTA, "Asistencia laboral", modo=MODO_EMPLEADO,
+                              opciones=(Opcion(FICHAR, boton),), sugerida=FICHAR,
+                              advertencias=fichaje.advertencias,
+                              tarjetas=tarjetas_empleado(_rol_empleado(roles), fichaje, ahora),
+                              **base)
+        return None
 
     def _evaluar_socio(self, roles, ahora, conn):
         """(DecisionSocio, fila de v_socio_estado) o (None, None) si no es socio."""
@@ -230,7 +299,7 @@ class AccesoService:
     # --- Confirmación (botón OK del modal) ---
 
     def confirmar(self, evaluacion, clave):
-        if evaluacion.estado != PROPUESTA or clave not in {o.clave for o in evaluacion.opciones}:
+        if evaluacion.estado != PROPUESTA or clave not in {o.clave for o in evaluacion.opciones if o.habilitada}:
             raise ValueError(f"La opción {clave!r} no estaba propuesta.")
         try:
             with self._transaccion() as conn:
@@ -240,7 +309,7 @@ class AccesoService:
                 return self._confirmar_fichaje(evaluacion, ahora, conn)
         except psycopg.errors.UniqueViolation:
             # Otra confirmación registró la entrada al mismo tiempo.
-            return Confirmacion(False, "La entrada ya estaba registrada.", "ambar")
+            return Confirmacion(False, "La llegada ya estaba marcada.", "ambar")
 
     def _confirmar_ingreso(self, ev, ahora, conn):
         fila = self._socios.obtener_por_id(ev.socio_id, bloquear=True, conn=conn)
@@ -253,8 +322,7 @@ class AccesoService:
             return Confirmacion(False, decision.mensaje, "rojo", decision.motivo)
         _id, momento = self._accesos.registrar_permitido(ev.socio_id, decision.membresia_id,
                                                          ev.distancia, conn=conn)
-        return Confirmacion(True, f"Ingreso registrado a las {hora_texto(momento)}. "
-                                  f"¡Buen entrenamiento, {ev.nombre.split()[0]}!", "verde",
+        return Confirmacion(True, f"¡Listo, {ev.nombre.split()[0]}! Buen entrenamiento.", "verde",
                             momento=momento)
 
     def _confirmar_fichaje(self, ev, ahora, conn):
@@ -264,13 +332,13 @@ class AccesoService:
             return Confirmacion(False, propuesta.mensaje, "ambar")
         if propuesta.operacion == reglas.ENTRADA:
             _id, momento = self._fichajes.registrar_entrada(ev.usuario_id, propuesta.jornada_id, conn=conn)
-            extra = "" if propuesta.jornada_id else " (fuera de turno)"
-            return Confirmacion(True, f"Entrada registrada a las {hora_texto(momento)}{extra}.", "verde",
+            # Sin jornada_id queda como "Fuera de turno" (se ve en Fichajes del personal).
+            return Confirmacion(True, f"Llegada marcada a las {hora_texto(momento)}.", "verde",
                                 momento=momento)
         momento = self._fichajes.registrar_salida(propuesta.fichaje_id, conn=conn)
         if momento is None:
-            return Confirmacion(False, "La salida ya estaba registrada.", "ambar")
-        return Confirmacion(True, f"Salida registrada a las {hora_texto(momento)}.", "verde",
+            return Confirmacion(False, "La salida ya estaba marcada.", "ambar")
+        return Confirmacion(True, f"Salida marcada a las {hora_texto(momento)}.", "verde",
                             momento=momento)
 
 

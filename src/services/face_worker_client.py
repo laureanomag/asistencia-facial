@@ -61,8 +61,15 @@ class FaceWorkerClient:
             return
         try:
             proc.kill()  # no guarda estado propio: cada operación ya está confirmada en la base
+            proc.wait(timeout=5)   # espera a que termine: no quedan procesos colgados
         except Exception:
             pass
+        for canal in (proc.stdin, proc.stdout):
+            try:
+                if canal is not None:
+                    canal.close()
+            except Exception:
+                pass
 
     def _escribir(self, proc, cola):
         try:

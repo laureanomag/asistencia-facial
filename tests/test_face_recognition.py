@@ -106,3 +106,47 @@ def test_sin_referencias(monkeypatch):
 
     monkeypatch.setattr(face_service, "_embedding", no_debe_llamarse)
     assert servicio.reconocer(rostro_bgr=None) == ResultadoReconocimiento()
+
+
+# --- Carga única de referencias ---
+
+class _RepoConFirma:
+    def __init__(self):
+        self.firma = (3, 3, "t1")
+        self.cargas = 0
+
+    def firma_referencias(self):
+        return self.firma
+
+    def obtener_referencias(self):
+        self.cargas += 1
+        return []
+
+
+def test_referencias_se_recargan_solo_si_cambian_las_fotos(monkeypatch):
+    monkeypatch.setattr(face_service, "_embedding", lambda _rostro: np.zeros(DIM, np.float32))
+    repo = _RepoConFirma()
+    servicio = FaceRecognitionService(person_repository=repo)
+    servicio.precargar()
+    servicio.precargar()                       # la app no vuelve a cargar nada
+    for _ in range(5):
+        servicio.reconocer(rostro_bgr=None)    # ingresos, rechazos, cancelaciones...
+    assert repo.cargas == 1
+
+    repo.firma = (6, 6, "t2")                  # se registró una persona con fotos
+    servicio.reconocer(rostro_bgr=None)
+    servicio.reconocer(rostro_bgr=None)
+    assert repo.cargas == 2
+
+
+def test_sin_firma_disponible_se_usan_las_referencias_cargadas(monkeypatch):
+    monkeypatch.setattr(face_service, "_embedding", lambda _rostro: np.zeros(DIM, np.float32))
+    repo = _RepoConFirma()
+    servicio = FaceRecognitionService(person_repository=repo)
+    servicio.precargar()
+
+    def falla():
+        raise ConnectionError("base caída")
+    repo.firma_referencias = falla
+    servicio.reconocer(rostro_bgr=None)
+    assert repo.cargas == 1

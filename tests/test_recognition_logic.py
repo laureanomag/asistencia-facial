@@ -125,7 +125,7 @@ def test_propuesta_trae_token_y_pausa_el_reconocimiento(entorno):
     _reloj, _face, acceso, control = entorno
     control.procesar(None)
     respuesta = control.procesar(None)
-    assert respuesta["estado"] == PROPUESTA and respuesta["cierre_s"] == 30
+    assert respuesta["estado"] == PROPUESTA and respuesta["cierre_s"] == 60
     assert respuesta["evaluacion"]["opciones"][0]["clave"] == ENTRENAR
     # Con el modal abierto no se intentan reconocimientos nuevos.
     assert control.procesar(None)["estado"] == "PROPUESTA_PENDIENTE"
@@ -167,7 +167,7 @@ def test_cierre_automatico_del_modal(entorno):
     reloj, _face, acceso, control = entorno
     control.procesar(None)
     token = control.procesar(None)["token"]
-    reloj.t += 36                       # pasó el cierre de 30 s y la vigencia del token
+    reloj.t += 66                       # pasó el cierre de 60 s y la vigencia del token
     assert control.procesar(None)["estado"] != "PROPUESTA_PENDIENTE"
     assert control.confirmar(token, ENTRENAR)["estado"] == "PROPUESTA_VENCIDA"
     assert acceso.confirmados == []

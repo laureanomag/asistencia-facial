@@ -70,15 +70,18 @@ def test_entrenador_que_tambien_es_socio(abierto_todo_el_dia):
     servicio = AccesoService()
 
     ev = servicio.evaluar(pid)
-    assert [o.clave for o in ev.opciones] == [ENTRENAR, FICHAR]
+    assert ev.modo == "ambos" and [o.clave for o in ev.opciones] == [FICHAR, ENTRENAR]
     resultado = servicio.confirmar(ev, FICHAR)
-    assert resultado.registrado and "fuera de turno" in resultado.mensaje
-    assert valor(db, "SELECT COUNT(*) FROM fichaje WHERE usuario_id = %s AND salida IS NULL", (uid,)) == 1
+    assert resultado.registrado and resultado.mensaje.startswith("Llegada marcada a las ")
+    # Sin turno cargado: queda como fuera de turno (sin jornada).
+    assert valor(db, "SELECT COUNT(*) FROM fichaje WHERE usuario_id = %s AND salida IS NULL "
+                     "AND jornada_id IS NULL", (uid,)) == 1
     assert _accesos(db) == []                                 # fichar no es un ingreso de socio
 
-    # Recién fichó: puede entrar a entrenar, pero no se le propone la salida.
+    # Recién fichó: puede entrar a entrenar; Trabajar queda deshabilitado con el motivo.
     ev = servicio.evaluar(pid)
-    assert [o.clave for o in ev.opciones] == [ENTRENAR]
+    assert [(o.clave, o.habilitada) for o in ev.opciones] == [(FICHAR, False), (ENTRENAR, True)]
+    assert ev.sugerida == ENTRENAR
 
 
 def test_empleado_con_entrada_recien_registrada(abierto_todo_el_dia):
@@ -88,7 +91,7 @@ def test_empleado_con_entrada_recien_registrada(abierto_todo_el_dia):
     servicio = AccesoService()
     assert servicio.confirmar(servicio.evaluar(pid), FICHAR).registrado
     ev = servicio.evaluar(pid)
-    assert ev.estado == AVISO and ev.mensaje.startswith("Ya registraste tu entrada a las ")
+    assert ev.estado == AVISO and ev.mensaje.startswith("Ya marcaste tu llegada a las ")
 
 
 def test_no_reconocido(db):

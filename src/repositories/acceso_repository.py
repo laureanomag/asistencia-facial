@@ -32,6 +32,18 @@ class AccesoRepository:
             cur.execute(query, (socio_id, membresia_id, motivo, distancia_facial))
             return cur.fetchone()
 
+    def socios_que_entrenaron_hoy(self, conn=None):
+        """Socios distintos con al menos un ingreso permitido hoy (hora de Argentina)."""
+        query = f"""
+            SELECT COUNT(DISTINCT socio_id)
+              FROM acceso
+             WHERE resultado = 'permitido'
+               AND (fecha_hora {AR})::date = (NOW() {AR})::date;
+        """
+        with usar_conexion(conn) as c, c.cursor() as cur:
+            cur.execute(query)
+            return cur.fetchone()[0]
+
     def ultimos(self, limite=5, conn=None):
         """Panel "Últimos ingresos":
         (id, fecha_hora, resultado, motivo_rechazo, nombre, apellido, plan)."""

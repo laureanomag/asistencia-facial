@@ -1,31 +1,34 @@
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
-    QDialog, QPushButton, QVBoxLayout, QHBoxLayout, QMessageBox
+    QDialog, QHBoxLayout, QMessageBox, QPushButton, QVBoxLayout
 )
 
 from hardware.camera_controller import CameraController
+from ui.componentes import con_rol, etiqueta
 from ui.frame_utils import frame_to_pixmap, frame_to_jpeg_bytes
 from ui.video_panel import VideoPanel
 
 
 class PhotoCaptureWindow(QDialog):
     """
-    Ventana que se abre al hacer clic en "Tomar Foto": muestra la webcam en
-    vivo y permite capturar una fotografía, que luego se devuelve al
-    ImageSlotWidget que la invocó.
+    Ventana que se abre al hacer clic en "Tomar foto": muestra la webcam en
+    vivo y permite capturar una fotografía, que luego se devuelve a quien la
+    abrió (el recuadro de foto del registro o el script de prueba).
 
     Flujo: abrir ventana -> webcam en vivo -> capturar fotografía -> cerrar
     ventana -> la foto queda disponible para mostrarse en el formulario.
+    La vista previa se muestra en espejo; se guarda la imagen original.
 
-    Comparte la webcam con el resto de la aplicación: si la cámara de
-    Asistencia está abierta, sigue abierta al cerrar esta ventana.
+    Comparte la webcam con el resto de la aplicación: si la cámara del
+    control de acceso está abierta, sigue abierta al cerrar esta ventana.
     """
 
     INTERVALO_MS = 30
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, titulo="Tomar foto", indicacion=None):
         super().__init__(parent)
-        self.setWindowTitle("Tomar Foto")
+        self.setWindowTitle(titulo)
+        self.setMinimumWidth(720)
 
         self.camera_controller = CameraController()
         self._ultimo_frame = None
@@ -33,18 +36,36 @@ class PhotoCaptureWindow(QDialog):
         self._pixmap_capturado = None
 
         self.video_panel = VideoPanel()
+        self.video_panel.setStyleSheet(
+            "background: #0B0B0B; border: 1px solid #2A2A2A; border-radius: 12px; color: #A8A8A8;")
         self.video_panel.setText("Iniciando cámara...")
 
-        self.capturar_button = QPushButton("Capturar Foto")
+        self.capturar_button = con_rol(QPushButton("Capturar foto"), "primario")
         self.cancelar_button = QPushButton("Cancelar")
+        self.capturar_button.setMinimumHeight(48)
+        self.cancelar_button.setMinimumHeight(48)
         self.capturar_button.clicked.connect(self._capturar)
         self.cancelar_button.clicked.connect(self.reject)
+        # Capturar solo con un clic: ni Enter ni Espacio (por ejemplo, teclas
+        # escritas en otra ventana) pueden disparar una captura.
+        for boton in (self.capturar_button, self.cancelar_button):
+            boton.setAutoDefault(False)
+            boton.setDefault(False)
+        self.capturar_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         botones_layout = QHBoxLayout()
-        botones_layout.addWidget(self.capturar_button)
-        botones_layout.addWidget(self.cancelar_button)
+        botones_layout.setSpacing(12)
+        botones_layout.addWidget(self.cancelar_button, 1)
+        botones_layout.addWidget(self.capturar_button, 2)
 
         layout = QVBoxLayout()
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(12)
+        layout.addWidget(etiqueta(titulo, "titulo-panel"))
+        if indicacion:
+            self.indicacion = etiqueta(indicacion, "subtitulo")
+            self.indicacion.setWordWrap(True)
+            layout.addWidget(self.indicacion)
         layout.addWidget(self.video_panel)
         layout.addLayout(botones_layout)
         self.setLayout(layout)

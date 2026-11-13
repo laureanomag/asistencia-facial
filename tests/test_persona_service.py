@@ -116,7 +116,7 @@ def test_dni_invalido(entrada):
 
 # --- Registro de socios ---
 
-@pytest.mark.parametrize("rol", [ADMINISTRADOR, RECEPCIONISTA, ENTRENADOR])
+@pytest.mark.parametrize("rol", [RECEPCIONISTA, ENTRENADOR])
 def test_registrar_socio_nuevo(servicio, personas, socios, rol):
     r = servicio.registrar_socio(_sesion(rol), DATOS_ANA, FOTOS, "388-4000000", "Juan Pérez")
     assert not r.persona_reutilizada and r.fotos_guardadas == 3
@@ -184,6 +184,11 @@ def test_persona_existente_sin_fotos_necesita_perfil(servicio, personas):
 def test_registrar_socio_requiere_permiso(servicio):
     with pytest.raises(AccesoDenegado):
         servicio.registrar_socio(_sesion(), DATOS_ANA, FOTOS, "388")
+
+
+def test_la_duenia_no_registra_socios(servicio):
+    with pytest.raises(AccesoDenegado):
+        servicio.registrar_socio(_sesion(ADMINISTRADOR), DATOS_ANA, FOTOS, "388")
 
 
 # --- Baja y reactivación ---

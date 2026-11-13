@@ -22,7 +22,7 @@ from services.acceso_service import (
 
 CONFIRMACIONES_REQUERIDAS = 2
 VENTANA_CONFIRMACION_S = 8.0
-CIERRE_AUTOMATICO_S = 30
+CIERRE_AUTOMATICO_S = 60
 CLAVE_DESCONOCIDO = "desconocido"
 
 
@@ -141,7 +141,7 @@ class ControlDeIngreso:
         return {"estado": RECHAZADO, "motivo": reglas.NO_RECONOCIDO,
                 "etiqueta": reglas.ETIQUETAS_MOTIVO[reglas.NO_RECONOCIDO], "nombre": None,
                 "reintento_s": int(self._antirrebote.segundos),
-                "mensaje": "No pudimos reconocerte. Acercate a recepción."}
+                "mensaje": "No pudimos reconocerte. Acercate al mostrador."}
 
     # --- Respuesta al modal ---
 
@@ -167,7 +167,7 @@ class ControlDeIngreso:
         if evaluacion is not None:
             self._antirrebote.registrar(evaluacion.persona_id)
         self._confirmador.reiniciar()
-        return {"estado": "CANCELADO", "mensaje": "Operación cancelada. No se registró nada."}
+        return {"estado": "CANCELADO", "mensaje": "Cancelado. No se guardó nada."}
 
 
 __all__ = ["AVISO", "PROPUESTA", "RECHAZADO", "Confirmador", "ControlDeIngreso", "mensaje_ambiguo"]

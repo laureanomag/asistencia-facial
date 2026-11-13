@@ -133,6 +133,28 @@ class FaceDetector:
         return frame[y1:y2, x1:x2]
 
 
+def decodificar_imagen(imagen_bytes):
+    """bytes JPEG/PNG -> imagen BGR de OpenCV, o None si no se puede leer."""
+    if not imagen_bytes:
+        return None
+    return cv2.imdecode(np.frombuffer(bytes(imagen_bytes), np.uint8), cv2.IMREAD_COLOR)
+
+
+def rostros_de_referencia(imagen_bgr, detector):
+    """Rostros de una foto de referencia, con el mismo criterio que usa la
+    carga de referencias: Haar estricto y, si no encuentra, permisivo."""
+    return detector.detectar(imagen_bgr) or detector.detectar(imagen_bgr, permisivo=True)
+
+
+def tiene_rostro_detectable(imagen_bytes, detector=None):
+    """True si la foto sirve como referencia para reconocer (se detecta un
+    rostro). Las fotos que no pasan esta revisión se omiten al reconocer."""
+    imagen = decodificar_imagen(imagen_bytes)
+    if imagen is None:
+        return False
+    return bool(rostros_de_referencia(imagen, detector or FaceDetector()))
+
+
 def _embedding(rostro_bgr):
     """Embedding de 512 valores con DeepFace + Facenet512. El rostro ya viene
     recortado por Haar, por eso no se ejecuta otro detector."""
@@ -162,6 +184,8 @@ class FaceRecognitionService:
         self._lock = threading.Lock()
         self._matriz = None   # embeddings normalizados, una fila por referencia
         self._etiquetas = []  # (persona_id, "Apellido, Nombre") por fila
+        self._firma = None    # firma de foto_persona con la que se cargaron
+        self._modelo_listo = False
 
     def invalidar(self):
         """Fuerza recargar referencias (por ejemplo, tras registrar personas).
@@ -171,16 +195,37 @@ class FaceRecognitionService:
         self._etiquetas = []
 
     def precargar(self):
-        """Carga el modelo FaceNet512 y los embeddings de referencia. Se llama
-        en segundo plano al abrir la cámara, para que el primer
-        reconocimiento no tenga que esperar."""
+        """Carga el modelo FaceNet512 y los embeddings de referencia una sola
+        vez, en segundo plano al iniciar la app, para que el primer
+        reconocimiento no tenga que esperar. Si ya están cargados, no hace nada."""
         with self._lock:
-            t0 = time.time()
-            print("[Reconocimiento] Cargando modelo Facenet512 (la primera vez descarga ~95 MB)...", flush=True)
-            _embedding(np.zeros((160, 160, 3), dtype=np.uint8))
-            print(f"[Reconocimiento] Modelo listo en {time.time() - t0:.1f}s", flush=True)
-            if self._matriz is None:
-                self._cargar_referencias()
+            if not self._modelo_listo:
+                t0 = time.time()
+                print("[Reconocimiento] Cargando modelo Facenet512 (la primera vez descarga ~95 MB)...", flush=True)
+                _embedding(np.zeros((160, 160, 3), dtype=np.uint8))
+                self._modelo_listo = True
+                print(f"[Reconocimiento] Modelo listo en {time.time() - t0:.1f}s", flush=True)
+            self._actualizar_referencias()
+
+    def _firma_actual(self):
+        """Firma de foto_persona, o None si el repositorio no la ofrece (pruebas)
+        o la base no responde (se sigue con las referencias ya cargadas)."""
+        obtener = getattr(self._repo, "firma_referencias", None)
+        if obtener is None:
+            return None
+        try:
+            return obtener()
+        except Exception as error:
+            print(f"[Reconocimiento] No se pudo consultar la firma de las fotos: {error}", flush=True)
+            return None
+
+    def _actualizar_referencias(self):
+        """Carga las referencias si no están cargadas o si cambiaron las fotos
+        en la base (alta, modificación o baja de una persona con fotos)."""
+        firma = self._firma_actual()
+        if self._matriz is None or (firma is not None and firma != self._firma):
+            self._cargar_referencias()
+            self._firma = firma
 
     def _cargar_referencias(self):
         t0 = time.time()
@@ -191,10 +236,10 @@ class FaceRecognitionService:
             if imagen is None:
                 continue
             try:
-                img = cv2.imdecode(np.frombuffer(bytes(imagen), np.uint8), cv2.IMREAD_COLOR)
+                img = decodificar_imagen(imagen)
                 if img is None:
                     continue
-                caras = self._detector.detectar(img) or self._detector.detectar(img, permisivo=True)
+                caras = rostros_de_referencia(img, self._detector)
                 if not caras:
                     print(f"[Reconocimiento] Foto sin rostro detectable (persona {persona_id}, {_angulo}): se omite", flush=True)
                     continue  # foto deficiente: no sirve como referencia
@@ -214,8 +259,7 @@ class FaceRecognitionService:
         de cada persona (entre todas sus fotos): se reconoce al más cercano sólo
         si no supera el umbral y si la segunda persona no está demasiado cerca."""
         with self._lock:
-            if self._matriz is None:
-                self._cargar_referencias()
+            self._actualizar_referencias()
             matriz, etiquetas = self._matriz, self._etiquetas
 
         if len(etiquetas) == 0:

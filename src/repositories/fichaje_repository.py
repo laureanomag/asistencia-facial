@@ -73,3 +73,20 @@ class FichajeRepository:
         with usar_conexion(conn) as c, c.cursor() as cur:
             cur.execute(query, (desde, hasta, usuario_id, usuario_id))
             return cur.fetchall()
+
+    def ultimos(self, limite=4, conn=None):
+        """Panel "Fichajes del personal" de Control de acceso, más recientes primero:
+        (id, nombre, apellido, entrada, salida, jornada_id, horario_entrada)."""
+        query = f"""
+            SELECT f.id, p.nombre, p.apellido, f.entrada {AR}, f.salida {AR},
+                   f.jornada_id, j.horario_entrada
+              FROM fichaje f
+              JOIN usuario u      ON u.id = f.usuario_id
+              LEFT JOIN persona p ON p.id = u.persona_id
+              LEFT JOIN jornada j ON j.id = f.jornada_id
+             ORDER BY GREATEST(f.entrada, COALESCE(f.salida, f.entrada)) DESC, f.id DESC
+             LIMIT %s;
+        """
+        with usar_conexion(conn) as c, c.cursor() as cur:
+            cur.execute(query, (limite,))
+            return cur.fetchall()
