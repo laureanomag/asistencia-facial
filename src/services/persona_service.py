@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from datetime import date
 
 from config.database import usar_conexion
-from services.auth_service import SOCIO_BAJA_REACTIVAR, SOCIO_REGISTRAR, autorizar
+from services.auth_service import (
+    MEMBRESIA_CONSULTAR, SOCIO_BAJA_REACTIVAR, SOCIO_REGISTRAR, autorizar,
+)
 
 ANGULOS = ("frente", "perfil_izquierdo", "perfil_derecho")
 _DNI_VALIDO = re.compile(r"^[0-9]{7,8}$")
@@ -96,6 +98,56 @@ class PersonaService:
                 self._personas.guardar_fotos(persona_id, fotos, conn=conn)
 
         return ResultadoRegistroSocio(persona_id, socio_id, reutilizada, len(fotos))
+
+    # --- Formulario de Socios ---
+
+    def buscar_persona(self, sesion, dni):
+        """dict con la persona del DNI (para no duplicarla) o None.
+        Lanza DatosInvalidos si el DNI no tiene 7 u 8 dígitos."""
+        autorizar(sesion, SOCIO_REGISTRAR)
+        dni = normalizar_dni(dni)
+        with self._transaccion() as conn:
+            persona = self._personas.obtener_por_dni(dni, conn=conn)
+            if persona is None:
+                return None
+            socio = self._socios.obtener_por_persona(persona[0], conn=conn)
+            return {"persona_id": persona[0], "nombre": persona[2], "apellido": persona[3],
+                    "fotos": self._personas.contar_fotos(persona[0], conn=conn),
+                    "es_socio": socio is not None, "socio_activo": bool(socio and socio[5])}
+
+    @staticmethod
+    def validar_socio(datos, fotos, existente=None):
+        """Errores por campo {campo: mensaje} para mostrarlos al lado de cada uno."""
+        errores = {}
+        try:
+            normalizar_dni(datos.get("dni"))
+        except DatosInvalidos as error:
+            errores["dni"] = str(error)
+        if existente is not None and existente.get("es_socio"):
+            errores["dni"] = ("Esa persona ya es socio." if existente.get("socio_activo")
+                              else "Esa persona es socio dado de baja: la dueña puede reactivarlo.")
+        if existente is None:
+            for campo, nombre in (("nombre", "el nombre"), ("apellido", "el apellido")):
+                if not (datos.get(campo) or "").strip():
+                    errores[campo] = f"Escribí {nombre}."
+        celular = (datos.get("celular") or "").strip()
+        if celular and not re.fullmatch(r"[0-9+\-\s()]{6,30}", celular):
+            errores["celular"] = "Usá solo números, espacios, guiones o +."
+        telefono = (datos.get("contacto_emergencia_telefono") or "").strip()
+        if not telefono:
+            errores["contacto_emergencia_telefono"] = "Escribí un teléfono de emergencia."
+        elif not re.fullmatch(r"[0-9+\-\s()]{6,30}", telefono):
+            errores["contacto_emergencia_telefono"] = "Usá solo números, espacios, guiones o +."
+        fotos = fotos or {}
+        if existente is None and len(fotos) < len(ANGULOS):
+            errores["fotos"] = "Cargá las 3 fotos (frente y los dos perfiles)."
+        elif existente is not None and not fotos and not existente.get("fotos"):
+            errores["fotos"] = "La persona no tiene fotos: cargá las 3."
+        return errores
+
+    def listar_socios(self, sesion, texto=None):
+        autorizar(sesion, MEMBRESIA_CONSULTAR)
+        return self._socios.listar(texto)
 
     def dar_baja_socio(self, sesion, socio_id, fecha_baja=None):
         """La persona, sus fotos, membresías y accesos se conservan."""

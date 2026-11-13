@@ -57,6 +57,30 @@ class SocioRepository:
             cur.execute(query, (socio_id,))
             return cur.rowcount == 1
 
+    def listar(self, texto=None, limite=200, conn=None):
+        """Socios (activos y dados de baja) con su membresía actual:
+        (socio_id, persona_id, dni, nombre, apellido, celular, activo, plan,
+         estado_membresia, estado_contable, fecha_vencimiento, saldo).
+        texto filtra por DNI, nombre o apellido (sin distinguir mayúsculas)."""
+        query = """
+            SELECT s.id, p.id, p.dni, p.nombre, p.apellido, p.celular, s.activo, v.plan,
+                   v.estado_membresia, v.estado_contable, v.fecha_vencimiento, v.saldo
+              FROM socio s
+              JOIN persona p ON p.id = s.persona_id
+              LEFT JOIN v_socio_estado v ON v.socio_id = s.id
+             WHERE (%(t)s::text IS NULL
+                    OR p.dni LIKE '%%' || %(t)s || '%%'
+                    OR p.nombre ILIKE '%%' || %(t)s || '%%'
+                    OR p.apellido ILIKE '%%' || %(t)s || '%%'
+                    OR (p.nombre || ' ' || p.apellido) ILIKE '%%' || %(t)s || '%%')
+             ORDER BY s.activo DESC, p.apellido, p.nombre
+             LIMIT %(limite)s;
+        """
+        texto = (texto or "").strip() or None
+        with usar_conexion(conn) as c, c.cursor() as cur:
+            cur.execute(query, {"t": texto, "limite": limite})
+            return cur.fetchall()
+
     def obtener_estado(self, socio_id, conn=None):
         """Estado del socio según la vista v_socio_estado, como dict con las
         claves de COLUMNAS_ESTADO, o None si no existe o está dado de baja.
