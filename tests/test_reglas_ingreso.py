@@ -292,3 +292,10 @@ def test_con_la_llegada_ya_marcada_puede_salir():
 def test_inicio_efectivo():
     assert r.inicio_efectivo(time(14, 0), [(time(13, 0), time(15, 0)), (time(15, 0), time(16, 0))]) == time(16, 0)
     assert r.inicio_efectivo(time(14, 0), [(time(10, 0), time(11, 0))]) == time(14, 0)
+
+
+def test_permiso_de_dia_completo_bloquea_a_cualquier_hora():
+    permiso = Jornada(3, *r.DIA_COMPLETO, "permiso")
+    assert r.DIA_COMPLETO == (time(0, 0), time(23, 59))
+    p = evaluar_fichaje(None, [permiso], JUEVES.replace(hour=23, minute=59, second=30))
+    assert (p.permitido, p.ausencia) == (False, "Permiso")

@@ -101,11 +101,11 @@ class JornadaRepository:
             return cur.rowcount == 1
 
     def ultimo_cambio(self, jornada_id, conn=None):
-        """(fecha_anterior, entrada_anterior, salida_anterior, estado_anterior, estado_nuevo,
-        cambiado_en, cambiado_por_usuario_id) o None."""
+        """(fecha_anterior, entrada_anterior, salida_anterior, estado_anterior,
+        fecha_nueva, entrada_nueva, salida_nueva, estado_nuevo) o None."""
         query = f"""
-            SELECT fecha_anterior, entrada_anterior, salida_anterior, estado_anterior, estado_nuevo,
-                   cambiado_en {AR}, cambiado_por_usuario_id
+            SELECT fecha_anterior, entrada_anterior, salida_anterior, estado_anterior,
+                   fecha_nueva, entrada_nueva, salida_nueva, estado_nuevo
               FROM jornada_cambio WHERE jornada_id = %s
              ORDER BY cambiado_en DESC, id DESC LIMIT 1;
         """
@@ -139,11 +139,14 @@ class JornadaRepository:
             return cur.fetchall()
 
     def mismo_lote(self, jornada_id, conn=None):
-        """Ids de las licencias o permisos aprobados juntos con esta fila (mismo
-        empleado, mismo estado y el mismo cambio: misma hora y misma persona)."""
+        """Ids de lo que se cambió junto con esta licencia o permiso (mismo
+        empleado y el mismo cambio: misma hora y misma persona): las filas de la
+        licencia o el permiso y los turnos que el permiso corrió o acortó
+        (motivo "Permiso de HH:MM a HH:MM")."""
         query = """
             WITH ult AS (
-                SELECT DISTINCT ON (c.jornada_id) c.jornada_id, c.cambiado_en, c.cambiado_por_usuario_id
+                SELECT DISTINCT ON (c.jornada_id) c.jornada_id, c.cambiado_en, c.cambiado_por_usuario_id,
+                       c.motivo
                   FROM jornada_cambio c
                  ORDER BY c.jornada_id, c.cambiado_en DESC, c.id DESC)
             SELECT j.id
@@ -151,8 +154,9 @@ class JornadaRepository:
               JOIN jornada base ON base.id = %s
               JOIN ult u        ON u.jornada_id = j.id
               JOIN ult ub       ON ub.jornada_id = base.id
-             WHERE j.usuario_id = base.usuario_id AND j.estado = base.estado
-               AND j.estado IN ('licencia_vacaciones', 'permiso')
+             WHERE j.usuario_id = base.usuario_id
+               AND base.estado IN ('licencia_vacaciones', 'permiso')
+               AND (j.estado = base.estado OR (j.estado = 'jornada' AND u.motivo LIKE 'Permiso de %%'))
                AND u.cambiado_en = ub.cambiado_en
                AND u.cambiado_por_usuario_id IS NOT DISTINCT FROM ub.cambiado_por_usuario_id
              ORDER BY j.fecha, j.horario_entrada;

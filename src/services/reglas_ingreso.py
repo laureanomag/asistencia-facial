@@ -54,7 +54,7 @@ SALIDA = "SALIDA"
 ESPERA_MINIMA_SALIDA = timedelta(minutes=10)
 
 # Licencia o permiso de día completo: la jornada ocupa todo el día.
-DIA_COMPLETO = (time(0, 0), time(23, 59, 59))
+DIA_COMPLETO = (time(0, 0), time(23, 59))
 
 # Llegar hasta 30 min antes del inicio del turno cuenta como "En horario".
 ANTICIPO_TURNO = timedelta(minutes=30)
@@ -230,14 +230,8 @@ def texto_trabajado(desde, hasta):
     return f"Trabajaste {minutos // 60} h {minutos % 60:02d} min"
 
 
-def al_minuto(hora):
-    """Las licencias y permisos se comparan al minuto: una fila corrida un
-    segundo (para no chocar con un turno que empieza a la misma hora) cuenta igual."""
-    return hora.replace(second=0, microsecond=0)
-
-
 def es_dia_completo(entrada, salida):
-    return (al_minuto(entrada), salida) == DIA_COMPLETO
+    return entrada == DIA_COMPLETO[0] and salida >= DIA_COMPLETO[1]
 
 
 def bloqueo_llegada(jornadas_hoy, ahora):
@@ -247,9 +241,11 @@ def bloqueo_llegada(jornadas_hoy, ahora):
         return "Licencia", "Hoy tenés licencia: no corresponde marcar llegada."
     hora = ahora.time()
     for j in jornadas_hoy:
-        if j.estado == "permiso" and al_minuto(j.horario_entrada) <= hora < j.horario_salida:
-            if es_dia_completo(j.horario_entrada, j.horario_salida):
-                return "Permiso", "Hoy tenés permiso: no corresponde marcar llegada."
+        if j.estado != "permiso":
+            continue
+        if es_dia_completo(j.horario_entrada, j.horario_salida):
+            return "Permiso", "Hoy tenés permiso: no corresponde marcar llegada."
+        if j.horario_entrada <= hora < j.horario_salida:
             return "Permiso", (f"Tenés permiso de {hora_texto(j.horario_entrada)} a "
                                f"{hora_texto(j.horario_salida)}: no corresponde marcar llegada.")
     return None
@@ -262,7 +258,7 @@ def inicio_efectivo(entrada, permisos):
     while corrido:
         corrido = False
         for desde, hasta in permisos:
-            if al_minuto(desde) <= entrada < hasta:
+            if desde <= entrada < hasta:
                 entrada, corrido = hasta, True
     return entrada
 

@@ -16,11 +16,15 @@ Licencias y permisos (la dueña): se guardan en jornada (estado
 jornada_cambio con el motivo, quién y cuándo.
   - Licencia de un rango de fechas: los turnos de cada día pasan a licencia;
     un día sin turno se crea como licencia de día completo.
-  - Permiso de un día: de día completo o de un rango de horas, en su propia fila.
-  - Anular: cada fila vuelve a como estaba antes (un turno vuelve a 'jornada');
-    una fila creada por la licencia o el permiso deja de contar como turno."""
+  - Permiso de un día, de día completo o de un rango de horas. Con los turnos
+    del día: si el permiso cubre el inicio, el turno empieza cuando termina el
+    permiso; si cubre el final, el turno se acorta; si cubre el turno entero,
+    el turno pasa a 'permiso'. Cada cambio queda en jornada_cambio con el motivo
+    "Permiso de HH:MM a HH:MM", y el permiso tiene su propia fila.
+  - Anular: cada fila vuelve a como estaba antes (los turnos, a su horario
+    original); una fila creada por la licencia o el permiso deja de contar."""
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from config.database import usar_conexion
 from services.auth_service import FICHAJE_CONSULTAR_PROPIO, JORNADA_GESTIONAR, autorizar
@@ -287,49 +291,93 @@ class FichajesService:
             errores["hasta"] = "La hora final tiene que ser posterior a la inicial."
         if errores:
             raise ErroresJornada(errores)
-        horas = (desde, hasta) if desde is not None else DIA_COMPLETO
+        d, h = (desde, hasta) if desde is not None else DIA_COMPLETO
+        por = sesion.usuario_id
         with self._transaccion() as conn:
             filas = self._jornadas.del_dia(usuario_id, fecha, conn=conn)
-            if any(not f[4] and f[3] == PERMISO and (f[1], f[2]) == horas for f in filas):
+            reales = [f for f in filas if not f[4]]
+            if any(f[3] == PERMISO and (f[1], f[2]) == (d, h) for f in reales):
                 return False                                    # ya tenía ese permiso
-            self._crear_o_reusar(usuario_id, fecha, filas, horas, PERMISO, motivo, sesion.usuario_id, conn)
+            corre = f"Permiso de {hora_texto(d)} a {hora_texto(h)}"
+            turnos = [f for f in reales if f[3] == "jornada" and f[1] < h and d < f[2]]
+            cubiertos = [f for f in turnos if d <= f[1] and f[2] <= h]
+            for jid, entrada, salida, _estado, _anulada in turnos:
+                if (jid, entrada, salida, _estado, _anulada) in cubiertos:
+                    continue
+                if d <= entrada:                                # cubre el inicio: el turno empieza después
+                    self._jornadas.cambiar(jid, fecha, h, salida, "jornada", corre, por, conn=conn)
+                elif salida <= h:                               # cubre el final: el turno se acorta
+                    self._jornadas.cambiar(jid, fecha, entrada, d, "jornada", corre, por, conn=conn)
+            # La fila del permiso: un turno cubierto entero pasa a 'permiso' con el horario del
+            # permiso; si no hay ninguno, se crea (o se reutiliza una anulada).
+            destino = next((f for f in cubiertos if f[1] == d), None) or (cubiertos[0] if cubiertos else None)
+            ocupadas = {f[1] for f in self._jornadas.del_dia(usuario_id, fecha, conn=conn)
+                        if not f[4] and (destino is None or f[0] != destino[0])}
+            if d in ocupadas:
+                raise ErroresJornada({"hasta": "Ya hay una licencia o un permiso que empieza a esa hora."})
+            for jid, entrada, salida, _estado, _anulada in cubiertos:
+                horas = (d, h) if destino is not None and jid == destino[0] else (entrada, salida)
+                self._jornadas.cambiar(jid, fecha, *horas, PERMISO, motivo, por, conn=conn)
+            if destino is None:
+                anuladas = [f for f in self._jornadas.del_dia(usuario_id, fecha, conn=conn) if f[4]]
+                # Si una anulada ocupa esa hora, se reutiliza esa; si no, cualquiera del día.
+                reusada = next((f for f in anuladas if f[1] == d), None) or (anuladas[0] if anuladas else None)
+                if reusada:
+                    self._jornadas.cambiar(reusada[0], fecha, d, h, PERMISO, motivo, por, conn=conn)
+                else:
+                    self._jornadas.crear_aprobada(usuario_id, fecha, d, h, PERMISO, motivo, por, conn=conn)
         return True
 
     def _crear_o_reusar(self, usuario_id, fecha, filas, horas, estado, motivo, aprobado_por, conn):
-        """Crea la fila de la licencia o el permiso (o reutiliza una anulada).
-        Como (empleado, fecha, entrada) es único, si ya hay un turno que empieza a
-        esa hora, la fila nueva empieza un segundo después (en pantalla, igual)."""
+        """Crea la fila de una licencia de día completo en un día sin turno (o
+        reutiliza una anulada del día, de preferencia la que empieza a esa hora)."""
         entrada, salida = horas
-        anulada = next((f for f in filas if f[4] and f[1] == entrada), None) or next((f for f in filas if f[4]), None)
-        ocupadas = {f[1] for f in filas if anulada is None or f[0] != anulada[0]}
-        while entrada in ocupadas:
-            entrada = (datetime.combine(fecha, entrada) + timedelta(seconds=1)).time()
-        if anulada:
-            self._jornadas.cambiar(anulada[0], fecha, entrada, salida, estado, motivo, aprobado_por, conn=conn)
+        anuladas = [f for f in filas if f[4]]
+        reusada = next((f for f in anuladas if f[1] == entrada), None) or (anuladas[0] if anuladas else None)
+        if reusada:
+            self._jornadas.cambiar(reusada[0], fecha, entrada, salida, estado, motivo, aprobado_por, conn=conn)
         else:
             self._jornadas.crear_aprobada(usuario_id, fecha, entrada, salida, estado, motivo, aprobado_por, conn=conn)
 
     def anular(self, sesion, jornada_id, motivo=""):
         """Anula la licencia o el permiso aprobado junto con esta fila (todos los
-        días del mismo lote). Devuelve la cantidad de filas anuladas."""
+        días del mismo lote y los turnos que corrió). Devuelve la cantidad de
+        filas de licencia o permiso anuladas."""
         autorizar(sesion, JORNADA_GESTIONAR)
         texto = "Anulación" + (f": {motivo}" if motivo else "")
+        por = sesion.usuario_id
         with self._transaccion() as conn:
             ids = self._jornadas.mismo_lote(jornada_id, conn=conn)
             if not ids:
                 raise ErroresJornada({"jornada": "No hay una licencia o un permiso para anular."})
+            filas = []
             for jid in ids:
-                _id, _uid, fecha, entrada, salida, _estado = self._jornadas.obtener(jid, bloquear=True, conn=conn)
+                actual = self._jornadas.obtener(jid, bloquear=True, conn=conn)
                 ultimo = self._jornadas.ultimo_cambio(jid, conn=conn)
-                if ultimo is not None and ultimo[3] != ultimo[4]:
-                    # Era otra cosa antes (por ejemplo, un turno): vuelve a como estaba.
-                    self._jornadas.cambiar(jid, ultimo[0], ultimo[1], ultimo[2], ultimo[3], texto,
-                                           sesion.usuario_id, conn=conn)
-                else:
-                    # Se creó con la licencia o el permiso: vuelve a 'jornada' y deja de contar como turno.
-                    self._jornadas.cambiar(jid, fecha, entrada, salida, "jornada", texto,
-                                           sesion.usuario_id, conn=conn)
-        return len(ids)
+                creada = ultimo is None or tuple(ultimo[:4]) == tuple(ultimo[4:])
+                filas.append((jid, actual, ultimo, creada))
+            # Horarios a los que vuelven los turnos (los turnos se restauran al final).
+            destinos = {(u[0], u[1]) for _jid, _a, u, creada in filas if not creada}
+            for jid, (_id, usuario_id, fecha, entrada, salida, _estado), _u, creada in filas:
+                if not creada:
+                    continue
+                # Se creó con la licencia o el permiso: vuelve a 'jornada' y deja de contar. Si su
+                # hora de entrada la necesita un turno que vuelve a su horario, queda en un minuto libre.
+                if (fecha, entrada) in destinos:
+                    entrada, salida = self._minuto_libre(usuario_id, fecha, jid, destinos, conn)
+                self._jornadas.cambiar(jid, fecha, entrada, salida, "jornada", texto, por, conn=conn)
+            for jid, _actual, ultimo, creada in filas:
+                if not creada:                                  # vuelve a como estaba (turno original)
+                    self._jornadas.cambiar(jid, *ultimo[:4], texto, por, conn=conn)
+        return sum(1 for _j, actual, _u, _c in filas if actual[5] in (LICENCIA, PERMISO))
+
+    def _minuto_libre(self, usuario_id, fecha, jornada_id, destinos, conn):
+        ocupadas = {f[1] for f in self._jornadas.del_dia(usuario_id, fecha, conn=conn) if f[0] != jornada_id}
+        ocupadas |= {hora for dia, hora in destinos if dia == fecha}
+        minuto = datetime.combine(fecha, time(0, 0))
+        while minuto.time() in ocupadas:
+            minuto += timedelta(minutes=1)
+        return minuto.time(), (minuto + timedelta(minutes=1)).time()
 
     def ausencias(self, sesion, desde, hasta, usuario_id=None):
         """Licencias y permisos agrupados por aprobación: [dict] con jornada_id,

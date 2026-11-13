@@ -60,7 +60,7 @@ def test_licencia_de_varios_dias(entorno):
     # Los dos días con turno pasan a licencia; el tercero, sin turno, se crea de día completo.
     assert _jornadas(e) == [(hoy, time(14, 0), time(22, 0), "licencia_vacaciones"),
                             (hoy + timedelta(days=1), time(14, 0), time(22, 0), "licencia_vacaciones"),
-                            (hoy + timedelta(days=2), time(0, 0), time(23, 59, 59), "licencia_vacaciones")]
+                            (hoy + timedelta(days=2), time(0, 0), time(23, 59), "licencia_vacaciones")]
     cambio = e["db"].execute("SELECT estado_anterior, estado_nuevo, motivo, cambiado_por_usuario_id, cambiado_en "
                              "FROM jornada_cambio ORDER BY id LIMIT 1").fetchone()
     assert cambio[:4] == ("jornada", "licencia_vacaciones", "Vacaciones", e["duenia"].usuario_id)
@@ -84,16 +84,32 @@ def test_permiso_de_dia_completo(entorno):
     for hora in (9, 14, 21):                                            # antes y durante el turno
         ev = _camara(e["hoy"], hora).evaluar(e["pid"])
         assert (ev.estado, ev.mensaje) == (AVISO, "Hoy tenés permiso: no corresponde marcar llegada.")
+    # El turno del día queda cubierto entero: pasa a 'permiso' de día completo.
+    assert _jornadas(e)[0] == (e["hoy"], time(0, 0), time(23, 59), "permiso")
     estados = [f.estado for f in e["servicio"].fichajes(e["duenia"], e["hoy"], e["hoy"])]
-    assert estados == ["Permiso", "Permiso"] and "Ausente" not in estados
+    assert estados == ["Permiso"]
+
+
+def _del_dia(e, fecha=None):
+    return [j[1:] for j in _jornadas(e) if j[0] == (fecha or e["hoy"])]
+
+
+def _sin_segundos(db):
+    return valor(db, "SELECT COUNT(*) FROM jornada WHERE EXTRACT(SECOND FROM horario_entrada) <> 0 "
+                     "OR EXTRACT(SECOND FROM horario_salida) <> 0") == 0
 
 
 @requiere_base
 def test_permiso_por_horas_bloquea_adentro_y_permite_afuera(entorno):
     e = entorno
     e["servicio"].dar_permiso(e["duenia"], e["profe"], e["hoy"], time(14, 0), time(16, 0), "Turno médico")
-    # El turno también empieza a las 14: el permiso queda un segundo después (no se ve en pantalla).
-    assert (e["hoy"], time(14, 0, 1), time(16, 0), "permiso") in _jornadas(e)
+    # Cubre el inicio del turno: el turno empieza a las 16 y el permiso tiene su fila de 14 a 16.
+    assert _del_dia(e) == [(time(14, 0), time(16, 0), "permiso"), (time(16, 0), time(22, 0), "jornada")]
+    cambio = e["db"].execute(
+        "SELECT entrada_anterior, entrada_nueva, salida_nueva, motivo, cambiado_por_usuario_id FROM jornada_cambio "
+        "WHERE estado_nuevo = 'jornada' ORDER BY id").fetchone()
+    assert cambio == (time(14, 0), time(16, 0), time(22, 0), "Permiso de 14:00 a 16:00", e["duenia"].usuario_id)
+    assert _sin_segundos(e["db"])
     adentro = _camara(e["hoy"], 15, 0).evaluar(e["pid"])
     assert (adentro.estado, adentro.mensaje) == (
         AVISO, "Tenés permiso de 14:00 a 16:00: no corresponde marcar llegada.")
@@ -101,6 +117,45 @@ def test_permiso_por_horas_bloquea_adentro_y_permite_afuera(entorno):
     ev = afuera.evaluar(e["pid"])
     assert ev.estado == PROPUESTA and ev.tarjetas[3] == ("Estado", "Llegaste 10 min tarde", "ambar")
     assert afuera.confirmar(ev, FICHAR).registrado
+
+
+@requiere_base
+def test_permiso_que_cubre_el_final_el_turno_entero_o_el_medio(entorno):
+    e = entorno
+    manana = e["hoy"] + timedelta(days=1)
+    e["servicio"].dar_permiso(e["duenia"], e["profe"], e["hoy"], time(20, 0), time(23, 0))
+    assert _del_dia(e) == [(time(14, 0), time(20, 0), "jornada"), (time(20, 0), time(23, 0), "permiso")]
+    e["servicio"].dar_permiso(e["duenia"], e["profe"], manana, time(13, 0), time(23, 0), "Examen")
+    assert _del_dia(e, manana) == [(time(13, 0), time(23, 0), "permiso")]      # el turno pasa a 'permiso'
+    pasado = e["hoy"] + timedelta(days=2)
+    e["servicio"].cargar_turnos(e["duenia"], e["profe"], [pasado], time(14, 0), time(22, 0))
+    e["servicio"].dar_permiso(e["duenia"], e["profe"], pasado, time(17, 0), time(18, 0))
+    assert _del_dia(e, pasado) == [(time(14, 0), time(22, 0), "jornada"), (time(17, 0), time(18, 0), "permiso")]
+    assert _sin_segundos(e["db"])
+
+
+@requiere_base
+def test_anular_el_permiso_devuelve_el_turno_a_su_horario(entorno):
+    e = entorno
+    e["servicio"].dar_permiso(e["duenia"], e["profe"], e["hoy"], time(14, 0), time(16, 0), "Turno médico")
+    filas = valor(e["db"], "SELECT COUNT(*) FROM jornada")
+    (lote,) = e["servicio"].ausencias(e["duenia"], e["hoy"], e["hoy"])
+    assert e["servicio"].anular(e["duenia"], lote["jornada_id"]) == 1
+    assert _del_dia(e) == [(time(14, 0), time(22, 0), "jornada")]          # turno original
+    assert valor(e["db"], "SELECT COUNT(*) FROM jornada") == filas          # no se borra nada
+    historial = e["db"].execute(
+        "SELECT entrada_anterior, entrada_nueva, motivo FROM jornada_cambio c JOIN jornada j ON j.id = c.jornada_id "
+        "WHERE j.estado = 'jornada' AND j.horario_entrada = '14:00' AND j.horario_salida = '22:00' "
+        "ORDER BY c.id").fetchall()
+    assert [tuple(h) for h in historial] == [(time(14, 0), time(16, 0), "Permiso de 14:00 a 16:00"),
+                                             (time(16, 0), time(14, 0), "Anulación")]
+    assert _sin_segundos(e["db"])
+    ev = _camara(e["hoy"], 14, 5).evaluar(e["pid"])
+    assert ev.estado == PROPUESTA and ev.tarjetas[3] == ("Estado", "Llegaste 5 min tarde", "ambar")
+    # Se puede volver a dar el mismo permiso: reutiliza la fila anulada.
+    e["servicio"].dar_permiso(e["duenia"], e["profe"], e["hoy"], time(14, 0), time(16, 0))
+    assert _del_dia(e) == [(time(14, 0), time(16, 0), "permiso"), (time(16, 0), time(22, 0), "jornada")]
+    assert valor(e["db"], "SELECT COUNT(*) FROM jornada") == filas
 
 
 @requiere_base

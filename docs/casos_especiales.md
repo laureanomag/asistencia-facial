@@ -147,10 +147,17 @@ y `jornada_cambio`, que guarda el motivo, quién lo aprobó y cuándo.
 - **Licencia:** se elige un rango de fechas. En cada día, los turnos cargados
   pasan a licencia; un día sin turno se crea como licencia de día completo.
 - **Permiso:** se elige un día y, si hace falta, un rango de horas. Sin horas es
-  de día completo. Se guarda en su propia fila; si un turno empieza a la misma
-  hora, la fila del permiso empieza un segundo después (en pantalla no se nota)
-  porque la base no admite dos jornadas del mismo empleado que empiecen a la
-  misma hora.
+  de día completo (de 00:00 a 23:59). Con los turnos de ese día:
+
+  | Turno | Permiso | Resultado |
+  |---|---|---|
+  | 14 a 22 | 14 a 16 (cubre el inicio) | Turno de 16 a 22 y permiso de 14 a 16 |
+  | 14 a 22 | 20 a 23 (cubre el final) | Turno de 14 a 20 y permiso de 20 a 23 |
+  | 14 a 22 | 13 a 23 o día completo (cubre todo) | El turno pasa a `permiso` con el horario del permiso |
+  | 14 a 22 | 17 a 18 (en el medio) | El turno no cambia y el permiso tiene su fila |
+
+  Cada turno corrido o acortado queda en `jornada_cambio` con el motivo
+  "Permiso de HH:MM a HH:MM", quién lo aprobó y cuándo. Ningún horario lleva segundos.
 - **Cámara:** desde que se aprueba, el empleado no puede marcar la llegada:
   - Licencia: "Hoy tenés licencia: no corresponde marcar llegada."
   - Permiso que cubre la hora actual: "Tenés permiso de HH:MM a HH:MM: no
@@ -163,12 +170,21 @@ y `jornada_cambio`, que guarda el motivo, quién lo aprobó y cuándo.
     válida y puede marcar la salida.
 - **Fichajes, Informes ("Asistencia del personal") y Panel:** esos días figuran
   como **"Licencia"** o **"Permiso"**, nunca como "Ausente", y no cuentan como tardanza.
-- **Anular:** anula todos los días aprobados juntos y queda en el historial.
-  Cada turno vuelve a `jornada` con su horario. Una fila que se creó con la
-  licencia o el permiso, en un día sin turno, también pasa a `jornada`, pero se
-  reconoce por su historial y no cuenta como turno (no se borra nada). Si
-  después se carga un turno o una licencia ese día, se reutiliza la fila.
+- **Anular:** anula todo lo que se aprobó junto (todos los días de una
+  licencia, o el permiso y los turnos que corrió) y queda en el historial
+  con el motivo "Anulación". Cada turno vuelve a su horario y a `jornada`;
+  en el ejemplo, el turno corrido vuelve de 16 a 22 a 14 a 22.
+- **Anular en un día sin turno (y la fila propia de un permiso):** la fila que
+  se creó con la licencia o el permiso no se borra (el historial la necesita y la base no permite borrar
+  una jornada con cambios). Pasa a `jornada`, pero se reconoce por su
+  historial (su alta tiene el mismo estado antes y después, y lo último que le
+  pasó fue anularla) y no cuenta como turno: no aparece en Jornadas, Fichajes,
+  Informes ni en la cámara, y nunca figura como "Ausente". Si su hora de
+  entrada la necesita un turno que vuelve a su horario (la base no admite dos
+  jornadas del mismo empleado que empiecen a la misma hora), queda guardada en
+  el primer minuto libre del día. Si después se carga un turno o se da una
+  licencia o un permiso ese día, se reutiliza esa fila.
 - **Código:**
   - `services/reglas_ingreso.py`: `bloqueo_llegada` e `inicio_efectivo`.
-  - `services/fichajes_service.py`: `dar_licencia`, `dar_permiso` y `anular`.
+  - `services/fichajes_service.py`: `dar_licencia`, `dar_permiso`, `anular` y `_minuto_libre`.
   - `repositories/jornada_repository.py`: `SIN_ANULADAS`.
