@@ -18,7 +18,7 @@ Orden de evaluación del socio (el primer motivo que aplica es el que se informa
 El fichaje de empleados no depende del horario de atención.
 """
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 NO_RECONOCIDO = "no_reconocido"
@@ -52,6 +52,9 @@ SALIDA = "SALIDA"
 # Tiempo mínimo entre la entrada y la salida de un fichaje, para que el
 # reconocimiento siguiente no proponga cerrar una entrada recién registrada.
 ESPERA_MINIMA_SALIDA = timedelta(minutes=10)
+
+# Licencia o permiso de día completo: la jornada ocupa todo el día.
+DIA_COMPLETO = (time(0, 0), time(23, 59, 59))
 
 # Llegar hasta 30 min antes del inicio del turno cuenta como "En horario".
 ANTICIPO_TURNO = timedelta(minutes=30)
@@ -94,6 +97,7 @@ class PropuestaFichaje:
     turno: object = None    # "14:00–22:00" (turnos de hoy) o None = sin turno hoy
     estado: str = ""        # "En horario", "Llegaste N min tarde", "Fuera de turno", "Trabajaste ..."
     en_turno: bool = False  # en su turno, a menos de ANTICIPO_TURNO del inicio o con la llegada marcada
+    ausencia: object = None  # "Licencia" o "Permiso" si hoy no corresponde marcar llegada
 
 
 # --- Formatos ---
@@ -226,6 +230,43 @@ def texto_trabajado(desde, hasta):
     return f"Trabajaste {minutos // 60} h {minutos % 60:02d} min"
 
 
+def al_minuto(hora):
+    """Las licencias y permisos se comparan al minuto: una fila corrida un
+    segundo (para no chocar con un turno que empieza a la misma hora) cuenta igual."""
+    return hora.replace(second=0, microsecond=0)
+
+
+def es_dia_completo(entrada, salida):
+    return (al_minuto(entrada), salida) == DIA_COMPLETO
+
+
+def bloqueo_llegada(jornadas_hoy, ahora):
+    """(ausencia, mensaje) si hoy no corresponde marcar la llegada, o None.
+    Licencia: todo el día. Permiso: mientras cubra la hora actual."""
+    if any(j.estado == "licencia_vacaciones" for j in jornadas_hoy):
+        return "Licencia", "Hoy tenés licencia: no corresponde marcar llegada."
+    hora = ahora.time()
+    for j in jornadas_hoy:
+        if j.estado == "permiso" and al_minuto(j.horario_entrada) <= hora < j.horario_salida:
+            if es_dia_completo(j.horario_entrada, j.horario_salida):
+                return "Permiso", "Hoy tenés permiso: no corresponde marcar llegada."
+            return "Permiso", (f"Tenés permiso de {hora_texto(j.horario_entrada)} a "
+                               f"{hora_texto(j.horario_salida)}: no corresponde marcar llegada.")
+    return None
+
+
+def inicio_efectivo(entrada, permisos):
+    """Hora desde la que se cuenta la tardanza: si un permiso cubre el inicio del
+    turno, el turno empieza cuando termina el permiso. permisos: [(desde, hasta)]."""
+    corrido = True
+    while corrido:
+        corrido = False
+        for desde, hasta in permisos:
+            if al_minuto(desde) <= entrada < hasta:
+                entrada, corrido = hasta, True
+    return entrada
+
+
 def _en_la_jornada(jornada, ahora):
     inicio = datetime.combine(ahora.date(), jornada.horario_entrada, tzinfo=ahora.tzinfo)
     fin = datetime.combine(ahora.date(), jornada.horario_salida, tzinfo=ahora.tzinfo)
@@ -257,9 +298,17 @@ def evaluar_fichaje(fichaje_abierto, jornadas_hoy, ahora):
         return PropuestaFichaje(True, SALIDA, f"Marcar la salida (llegada a las {hora_texto(entrada)}).",
                                 fichaje_id=fichaje_id, turno=turno, estado=trabajado, en_turno=True)
 
+    bloqueo = bloqueo_llegada(jornadas_hoy, ahora)
+    if bloqueo is not None:
+        ausencia, mensaje = bloqueo
+        return PropuestaFichaje(False, None, mensaje, turno=turno, estado=ausencia, ausencia=ausencia)
+
+    permisos = [(j.horario_entrada, j.horario_salida) for j in jornadas_hoy if j.estado == "permiso"]
     for jornada in jornadas_hoy:
         dentro, inicio = _en_la_jornada(jornada, ahora)
         if dentro:
+            desde = inicio_efectivo(jornada.horario_entrada, permisos)
+            inicio = datetime.combine(ahora.date(), desde, tzinfo=ahora.tzinfo)
             tarde = int((ahora - inicio).total_seconds() // 60)
             estado = f"Llegaste {tarde} min tarde" if tarde > 0 else "En horario"
             return PropuestaFichaje(

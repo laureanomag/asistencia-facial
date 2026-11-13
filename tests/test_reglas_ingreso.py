@@ -215,10 +215,10 @@ def test_entrada_fuera_de_turno(hora):
 def test_entrada_sin_jornada_y_con_licencia():
     p = evaluar_fichaje(None, [], JUEVES)
     assert (p.turno, p.estado, p.advertencias) == (None, "Fuera de turno", ())
-    licencia = Jornada(2, time(7, 0), time(15, 0), "licencia_vacaciones")
-    p = evaluar_fichaje(None, [licencia], JUEVES.replace(hour=8))
-    assert (p.jornada_id, p.turno) == (None, None)
-    assert p.advertencias == ("Hoy figura con licencia o vacaciones.",)
+    permiso = Jornada(2, time(7, 0), time(9, 0), "permiso")
+    p = evaluar_fichaje(None, [permiso], JUEVES.replace(hour=10))     # el permiso ya terminó
+    assert (p.permitido, p.jornada_id, p.turno) == (True, None, None)
+    assert p.advertencias == ("Hoy figura con permiso.",)
 
 
 def test_varios_turnos_en_el_dia():
@@ -253,3 +253,42 @@ def test_entrada_abierta_de_otro_dia():
     p = evaluar_fichaje((40, entrada), [], JUEVES.replace(hour=7, minute=1))
     assert p.operacion == r.SALIDA
     assert p.advertencias == ("Tiene una entrada abierta del 11/11/2026 a las 07:00.",)
+
+
+# --- Licencias y permisos ---
+
+def test_licencia_bloquea_la_llegada_todo_el_dia():
+    licencia = Jornada(2, time(7, 0), time(15, 0), "licencia_vacaciones")
+    for hora in (6, 8, 20):
+        p = evaluar_fichaje(None, [licencia], JUEVES.replace(hour=hora))
+        assert (p.permitido, p.operacion, p.ausencia) == (False, None, "Licencia")
+        assert p.mensaje == "Hoy tenés licencia: no corresponde marcar llegada."
+
+
+def test_permiso_de_dia_completo():
+    permiso = Jornada(3, *r.DIA_COMPLETO, "permiso")
+    p = evaluar_fichaje(None, [TURNO_MANANA, permiso], JUEVES.replace(hour=7, minute=5))
+    assert (p.permitido, p.ausencia) == (False, "Permiso")
+    assert p.mensaje == "Hoy tenés permiso: no corresponde marcar llegada."
+
+
+def test_permiso_por_horas_bloquea_adentro_y_permite_afuera():
+    permiso = Jornada(3, time(7, 0), time(9, 0), "permiso")
+    adentro = evaluar_fichaje(None, [TURNO_MANANA, permiso], JUEVES.replace(hour=8, minute=30))
+    assert (adentro.permitido, adentro.ausencia) == (False, "Permiso")
+    assert adentro.mensaje == "Tenés permiso de 07:00 a 09:00: no corresponde marcar llegada."
+    afuera = evaluar_fichaje(None, [TURNO_MANANA, permiso], JUEVES.replace(hour=9, minute=10))
+    assert (afuera.permitido, afuera.jornada_id) == (True, 1)
+    assert afuera.estado == "Llegaste 10 min tarde"             # la tardanza se cuenta desde el fin del permiso
+
+
+def test_con_la_llegada_ya_marcada_puede_salir():
+    licencia = Jornada(2, time(7, 0), time(15, 0), "licencia_vacaciones")
+    entrada = JUEVES.replace(hour=7, minute=0)
+    p = evaluar_fichaje((40, entrada), [licencia], JUEVES.replace(hour=10))
+    assert (p.permitido, p.operacion, p.fichaje_id) == (True, r.SALIDA, 40)
+
+
+def test_inicio_efectivo():
+    assert r.inicio_efectivo(time(14, 0), [(time(13, 0), time(15, 0)), (time(15, 0), time(16, 0))]) == time(16, 0)
+    assert r.inicio_efectivo(time(14, 0), [(time(10, 0), time(11, 0))]) == time(14, 0)

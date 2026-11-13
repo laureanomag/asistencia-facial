@@ -10,13 +10,23 @@ from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
-from services.reglas_ingreso import ETIQUETAS_MOTIVO, fecha_texto, hora_texto, pesos
+from services.reglas_ingreso import ETIQUETAS_MOTIVO, es_dia_completo, fecha_texto, hora_texto, pesos
 from ui import iconos, tema
 from ui.componentes import EtiquetaEstado, con_rol, etiqueta
 from ui.graficos import BarrasHorizontales, BarrasVerticales
 
 HORA_DESDE, HORA_HASTA = 6, 23
 NOMBRES_ROL = {"entrenador": "Entrenador", "recepcionista": "Recepcionista", "administrador": "Administrador"}
+
+
+def texto_ausencia(nombre, apellido, usuario, estado, desde, hasta):
+    """'Sofía Romero · Licencia' o 'Luis Gómez · Permiso de 14:00 a 16:00'."""
+    quien = f"{nombre or usuario} {apellido or ''}".strip()
+    if estado == "licencia_vacaciones":
+        return f"{quien} · Licencia"
+    if es_dia_completo(desde, hasta):
+        return f"{quien} · Permiso"
+    return f"{quien} · Permiso de {hora_texto(desde)} a {hora_texto(hasta)}"
 
 
 class Indicador(QFrame):
@@ -271,6 +281,7 @@ class PanelPage(QWidget):
         self.recaudacion.mostrar(pesos(d.recaudacion_mes), "Pagos registrados en el mes")
         nombres = [f"{n or u} {a or ''}".strip() + f" · desde las {hora_texto(e)}"
                    for n, a, u, e, _roles in d.empleados_trabajando]
+        nombres += [texto_ausencia(*fila) for fila in d.ausencias_hoy]
         self.trabajando.mostrar(len(d.empleados_trabajando), "\n".join(nombres) or "Nadie fichó entrada")
         self.por_vencer.mostrar(filas_por_vencer(d.por_vencer), str(len(d.por_vencer)))
         self.deben.mostrar(filas_deben(d.deben), str(len(d.deben)))

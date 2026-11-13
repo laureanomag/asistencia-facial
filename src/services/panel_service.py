@@ -21,6 +21,7 @@ class Indicadores:
     ingresos_por_hora: dict = field(default_factory=dict)
     socios_por_plan: list = field(default_factory=list)  # (plan, cantidad)
     empleados_trabajando: list = field(default_factory=list)
+    ausencias_hoy: list = field(default_factory=list)    # (nombre, apellido, usuario, estado, desde, hasta)
 
     @property
     def total_rechazos_hoy(self):
@@ -51,4 +52,5 @@ class PanelService:
                 ingresos_por_hora=self._repo.ingresos_por_hora(DIAS_INGRESOS_POR_HORA, conn=conn),
                 socios_por_plan=list(self._repo.socios_por_plan(conn=conn)),
                 empleados_trabajando=list(self._repo.empleados_trabajando(conn=conn)),
+                ausencias_hoy=list(self._repo.ausencias_hoy(conn=conn)),
             )

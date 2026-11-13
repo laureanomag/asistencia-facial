@@ -85,6 +85,18 @@ class PanelRepository:
              GROUP BY pl.id, pl.nombre
              ORDER BY pl.id;""", conn=conn)
 
+    def ausencias_hoy(self, conn=None):
+        """(nombre, apellido, nombre_usuario, estado, entrada, salida): licencias y
+        permisos de hoy (hora de Argentina)."""
+        return self._todos(f"""
+            SELECT p.nombre, p.apellido, u.nombre_usuario, j.estado, j.horario_entrada, j.horario_salida
+              FROM jornada j
+              JOIN usuario u      ON u.id = j.usuario_id
+              LEFT JOIN persona p ON p.id = u.persona_id
+             WHERE j.fecha = (NOW() {AR})::date
+               AND j.estado IN ('licencia_vacaciones', 'permiso')
+             ORDER BY j.estado, p.apellido, j.horario_entrada;""", conn=conn)
+
     def empleados_trabajando(self, conn=None):
         """(nombre, apellido, nombre_usuario, entrada, roles) con fichaje abierto."""
         return self._todos(f"""

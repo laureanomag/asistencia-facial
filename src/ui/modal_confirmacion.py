@@ -22,7 +22,7 @@ MARGEN = 28
 ALTO_BOTON = 52
 
 TONO_ADVERTENCIA = (("Debe", "rojo"), ("Vence", "ambar"), ("Tiene una entrada abierta", "ambar"),
-                    ("Hoy figura con", "ambar"))
+                    ("Hoy figura con", "ambar"), ("Hoy tenés", "ambar"), ("Tenés permiso", "ambar"))
 
 
 def tono_advertencia(texto):

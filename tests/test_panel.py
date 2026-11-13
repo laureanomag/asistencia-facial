@@ -39,6 +39,7 @@ class Repo:
     def ingresos_por_hora(self, dias, conn=None): return {8: 2, 18: 9, 19: 7}
     def socios_por_plan(self, conn=None): return [("Pase por día", 3), ("3 veces por semana", 20), ("Pase libre", 14)]
     def empleados_trabajando(self, conn=None): return [("Rocío", "Paz", "rocio", datetime(2026, 11, 13, 7, 25), "recepcionista")]
+    def ausencias_hoy(self, conn=None): return []
 
 
 def test_servicio_arma_los_indicadores():

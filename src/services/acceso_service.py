@@ -254,8 +254,10 @@ class AccesoService:
         puede_fichar = fichaje is not None and fichaje.permitido
         socio_activo = decision is not None and decision.motivo != reglas.SOCIO_INACTIVO
         membresia_id = decision.membresia_id if decision else None
+        # Licencia o permiso aprobado: no se ofrece marcar la llegada (solo Entrenar, si es socio).
+        con_ausencia = fichaje is not None and fichaje.ausencia is not None
 
-        if socio_activo and fichaje is not None and (puede_entrenar or puede_fichar):
+        if socio_activo and fichaje is not None and not con_ausencia and (puede_entrenar or puede_fichar):
             trabajar = Opcion(FICHAR, "Me voy" if fichaje.operacion == reglas.SALIDA else "Trabajar",
                               puede_fichar, None if puede_fichar else fichaje.mensaje)
             entrenar = Opcion(ENTRENAR, "Entrenar", puede_entrenar,
@@ -268,10 +270,11 @@ class AccesoService:
                               opciones=(trabajar, entrenar), sugerida=sugerida, advertencias=avisos,
                               lineas=(linea_empleado(fichaje), linea_socio(estado)),
                               membresia_id=membresia_id, **base)
-        if puede_entrenar and fichaje is None:
+        if puede_entrenar and (fichaje is None or con_ausencia):
+            avisos = _sin_repetir_tarjetas(decision.advertencias) + ((fichaje.mensaje,) if con_ausencia else ())
             return Evaluacion(PROPUESTA, "¿Confirmás tu entrada al gimnasio?", modo=MODO_SOCIO,
                               opciones=(Opcion(ENTRENAR, "Entrar"),), sugerida=ENTRENAR,
-                              advertencias=_sin_repetir_tarjetas(decision.advertencias),
+                              advertencias=avisos,
                               tarjetas=tarjetas_socio(estado), membresia_id=membresia_id, **base)
         if puede_fichar:
             boton = "Me voy" if fichaje.operacion == reglas.SALIDA else "Llegué"

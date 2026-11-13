@@ -137,3 +137,38 @@ Los botones son **Cancelar · Trabajar · Entrenar**:
 - **Entrada abierta de otro día:** al reconocerlo se propone cerrarla y se
   avisa la fecha.
 - **Código:** `services/reglas_ingreso.py`, `evaluar_fichaje`.
+
+## Licencia o permiso del personal
+
+La dueña los aprueba en **Jornadas**, con "Dar licencia" o "Dar permiso". No
+hay tablas nuevas: se usan `jornada.estado` (`licencia_vacaciones` o `permiso`)
+y `jornada_cambio`, que guarda el motivo, quién lo aprobó y cuándo.
+
+- **Licencia:** se elige un rango de fechas. En cada día, los turnos cargados
+  pasan a licencia; un día sin turno se crea como licencia de día completo.
+- **Permiso:** se elige un día y, si hace falta, un rango de horas. Sin horas es
+  de día completo. Se guarda en su propia fila; si un turno empieza a la misma
+  hora, la fila del permiso empieza un segundo después (en pantalla no se nota)
+  porque la base no admite dos jornadas del mismo empleado que empiecen a la
+  misma hora.
+- **Cámara:** desde que se aprueba, el empleado no puede marcar la llegada:
+  - Licencia: "Hoy tenés licencia: no corresponde marcar llegada."
+  - Permiso que cubre la hora actual: "Tenés permiso de HH:MM a HH:MM: no
+    corresponde marcar llegada." (si es de día completo: "Hoy tenés permiso…").
+  - Fuera del permiso por horas, puede marcar la llegada; la tardanza se cuenta
+    desde que termina el permiso.
+  - Si también es socio con membresía vigente, solo se le ofrece **Entrar**
+    para entrenar.
+  - Si ya había marcado la llegada antes de la aprobación, esa llegada es
+    válida y puede marcar la salida.
+- **Fichajes, Informes ("Asistencia del personal") y Panel:** esos días figuran
+  como **"Licencia"** o **"Permiso"**, nunca como "Ausente", y no cuentan como tardanza.
+- **Anular:** anula todos los días aprobados juntos y queda en el historial.
+  Cada turno vuelve a `jornada` con su horario. Una fila que se creó con la
+  licencia o el permiso, en un día sin turno, también pasa a `jornada`, pero se
+  reconoce por su historial y no cuenta como turno (no se borra nada). Si
+  después se carga un turno o una licencia ese día, se reutiliza la fila.
+- **Código:**
+  - `services/reglas_ingreso.py`: `bloqueo_llegada` e `inicio_efectivo`.
+  - `services/fichajes_service.py`: `dar_licencia`, `dar_permiso` y `anular`.
+  - `repositories/jornada_repository.py`: `SIN_ANULADAS`.

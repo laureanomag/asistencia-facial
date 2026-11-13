@@ -20,8 +20,8 @@ JUEVES = date(2026, 11, 12)
 AHORA = datetime(2026, 11, 13, 18, 0)        # viernes
 
 
-def jornada(jid, fecha, entrada, salida, estado="jornada", nombre="Sofía"):
-    return (jid, 7, nombre, "Romero", fecha, entrada, salida, estado)
+def jornada(jid, fecha, entrada, salida, estado="jornada", nombre="Sofía", usuario_id=None):
+    return (jid, usuario_id or (7 if nombre == "Sofía" else 8), nombre, "Romero", fecha, entrada, salida, estado)
 
 
 def fichaje(fid, entrada, salida=None, jornada_id=None, turno=(None, None)):

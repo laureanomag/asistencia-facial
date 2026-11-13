@@ -15,7 +15,7 @@ from ui import tema
 from ui.componentes import CampoFormulario, con_rol, etiqueta
 from ui.tablas import crear_tabla, llenar
 
-INGRESOS, MEMBRESIAS = "ingresos", "membresias"
+INGRESOS, MEMBRESIAS, PERSONAL = "ingresos", "membresias", "personal"
 
 
 def elegir_ruta(parent, sugerido, filtro):
@@ -43,6 +43,7 @@ class InformesPage(QWidget):
         self.tipo = QComboBox()
         self.tipo.addItem("Ingresos y rechazos", INGRESOS)
         self.tipo.addItem("Estado de membresías y cupos", MEMBRESIAS)
+        self.tipo.addItem("Asistencia del personal", PERSONAL)
         self.tipo.currentIndexChanged.connect(self._tipo_elegido)
         hoy_qt = QDate(hoy().year, hoy().month, hoy().day)
         self.desde, self.hasta = QDateEdit(hoy_qt.addDays(-6)), QDateEdit(hoy_qt)
@@ -104,7 +105,8 @@ class InformesPage(QWidget):
         layout.addWidget(caja)
 
     def _tipo_elegido(self, *_):
-        self.filtros.setVisible(self.tipo.currentData() == INGRESOS)
+        self.filtros.setVisible(self.tipo.currentData() in (INGRESOS, PERSONAL))
+        self.campos["dni"].setVisible(self.tipo.currentData() == INGRESOS)
         self.informe = None
         for boton in (self.boton_excel, self.boton_pdf):
             boton.setEnabled(False)
@@ -114,12 +116,15 @@ class InformesPage(QWidget):
         for campo in self.campos.values():
             campo.limpiar_error()
         try:
-            if self.tipo.currentData() == INGRESOS:
+            if self.tipo.currentData() in (INGRESOS, PERSONAL):
                 desde, hasta = _fecha(self.desde), _fecha(self.hasta)
                 if hasta < desde:
                     self.campos["hasta"].mostrar_error("No puede ser anterior a Desde.")
                     return
-                informe = self.servicio.ingresos(self.sesion, desde, hasta, self.dni.text())
+                if self.tipo.currentData() == PERSONAL:
+                    informe = self.servicio.personal(self.sesion, desde, hasta)
+                else:
+                    informe = self.servicio.ingresos(self.sesion, desde, hasta, self.dni.text())
             else:
                 informe = self.servicio.membresias(self.sesion, self._hoy())
         except DatosInvalidos as error:
@@ -137,7 +142,8 @@ class InformesPage(QWidget):
         if self.tabla is not None:
             self.tablas.removeWidget(self.tabla)
             self.tabla.deleteLater()
-        self.tabla = crear_tabla(informe.encabezados, estirar=2 if informe.encabezados[0] == "Fecha" else 0)
+        self.tabla = crear_tabla(informe.encabezados, estirar=next(
+            (i for i, e in enumerate(informe.encabezados) if e in ("Socio", "Empleado")), 0))
         llenar(self.tabla, informe.filas)
         self.tablas.addWidget(self.tabla)
         self.vacio.setText("No hay datos para los filtros elegidos.")

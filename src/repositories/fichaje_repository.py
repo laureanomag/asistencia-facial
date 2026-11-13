@@ -1,4 +1,5 @@
 from config.database import usar_conexion
+from repositories.jornada_repository import SIN_ANULADAS
 
 AR = "AT TIME ZONE 'America/Argentina/Buenos_Aires'"
 
@@ -8,12 +9,13 @@ class FichajeRepository:
     Las fechas y horas se devuelven en hora de Argentina."""
 
     def jornadas_del_dia(self, usuario_id, fecha, conn=None):
-        """(id, horario_entrada, horario_salida, estado) del empleado en esa fecha."""
-        query = """
-            SELECT id, horario_entrada, horario_salida, estado
-              FROM jornada
-             WHERE usuario_id = %s AND fecha = %s
-             ORDER BY horario_entrada;
+        """(id, horario_entrada, horario_salida, estado) del empleado en esa fecha
+        (turnos, licencias y permisos; sin las licencias o permisos anulados en días sin turno)."""
+        query = f"""
+            SELECT j.id, j.horario_entrada, j.horario_salida, j.estado
+              FROM jornada j
+             WHERE j.usuario_id = %s AND j.fecha = %s AND {SIN_ANULADAS}
+             ORDER BY j.horario_entrada;
         """
         with usar_conexion(conn) as c, c.cursor() as cur:
             cur.execute(query, (usuario_id, fecha))

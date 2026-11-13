@@ -1,6 +1,9 @@
 """Informes de la dueña (reporte.consultar):
 - Ingresos y rechazos por fechas y, opcionalmente, por socio (tabla acceso).
 - Estado de membresía y cupos de todos los socios activos (v_socio_estado).
+- Asistencia del personal por fechas (jornada y fichaje): turno, llegada,
+  salida, tardanza, horas trabajadas y estado; los días de licencia o permiso
+  figuran como tales, nunca como Ausente.
 Cada informe se puede exportar a Excel o PDF (services/exportar.py)."""
 from collections import Counter
 
@@ -23,7 +26,8 @@ def _dni(dni):
 
 
 class InformeService:
-    def __init__(self, personas=None, socios=None, accesos=None, transaccion=usar_conexion):
+    def __init__(self, personas=None, socios=None, accesos=None, jornadas=None, fichajes=None, horario=None,
+                 transaccion=usar_conexion):
         if personas is None:
             from repositories.person_repository import PersonRepository
             personas = PersonRepository()
@@ -33,7 +37,17 @@ class InformeService:
         if accesos is None:
             from repositories.acceso_repository import AccesoRepository
             accesos = AccesoRepository()
+        if jornadas is None:
+            from repositories.jornada_repository import JornadaRepository
+            jornadas = JornadaRepository()
+        if fichajes is None:
+            from repositories.fichaje_repository import FichajeRepository
+            fichajes = FichajeRepository()
+        if horario is None:
+            from repositories.horario_repository import HorarioRepository
+            horario = HorarioRepository()
         self._personas, self._socios, self._accesos = personas, socios, accesos
+        self._jornadas, self._fichajes, self._horario = jornadas, fichajes, horario
         self._transaccion = transaccion
 
     def ingresos(self, sesion, desde, hasta, dni=None):
@@ -91,3 +105,21 @@ class InformeService:
         return Informe("Estado de membresías y cupos", f"Al {fecha_texto(hoy)}",
                        ["Socio", "DNI", "Plan", "Vence", "Accesos usados", "Días esta semana",
                         "Membresía", "Estado contable", "Saldo"], datos, resumen)
+
+    def personal(self, sesion, desde, hasta):
+        """Asistencia del personal entre dos fechas (incluidas)."""
+        from services.fichajes_service import calcular_fichajes
+        autorizar(sesion, REPORTE_CONSULTAR)
+        if hasta < desde:
+            raise DatosInvalidos("La fecha final no puede ser anterior a la inicial.")
+        with self._transaccion() as conn:
+            ahora = self._horario.ahora(conn=conn)
+            jornadas = self._jornadas.listar(desde, hasta, conn=conn)
+            fichajes = self._fichajes.listar(desde, hasta, conn=conn)
+        filas = calcular_fichajes(jornadas, fichajes, ahora)
+        conteo = Counter(f.estado for f in filas)
+        resumen = [" · ".join(f"{estado}: {n}" for estado, n in sorted(conteo.items()))] if conteo else []
+        return Informe("Asistencia del personal", f"Del {fecha_texto(desde)} al {fecha_texto(hasta)}",
+                       ["Fecha", "Empleado", "Turno", "Llegada", "Salida", "Tardanza", "Trabajado", "Estado"],
+                       [[fecha_texto(f.fecha), f.empleado, f.turno, f.llegada, f.salida, f.tardanza, f.trabajado,
+                         f.estado] for f in filas], resumen)
