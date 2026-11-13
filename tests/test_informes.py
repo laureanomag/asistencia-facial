@@ -35,15 +35,22 @@ def app():
 # --- Exportación ---
 
 def test_exportar_excel_y_pdf(tmp_path):
-    ruta = exportar_excel(INFORME, tmp_path / "informe.xlsx")
+    from datetime import datetime
+    emitido = datetime(2026, 11, 13, 18, 42)
+    ruta = exportar_excel(INFORME, tmp_path / "informe.xlsx", emitido)
     hoja = load_workbook(ruta).active
     valores = [[c for c in fila if c is not None] for fila in hoja.iter_rows(values_only=True)]
-    assert valores[0] == ["Ingresos y rechazos"]
+    assert valores[:3] == [["ZebraGym"],
+                           ["Av. Corrientes 2833, Y4600 San Salvador de Jujuy, Jujuy (barrio San Pedrito)"],
+                           ["Emitido el 13/11/2026 a las 18:42"]]
+    assert len(hoja._images) == 1                                   # el logo
+    assert ["Ingresos y rechazos"] in valores
     assert ["Fecha", "Hora", "Socio", "DNI", "Plan", "Resultado", "Motivo"] in valores
     assert valores[-1][-1] == "Gimnasio cerrado"
-    pdf = exportar_pdf(INFORME, tmp_path / "informe.pdf")
+    pdf = exportar_pdf(INFORME, tmp_path / "informe.pdf", emitido)
     with open(pdf, "rb") as archivo:
-        assert archivo.read(5) == b"%PDF-"
+        contenido = archivo.read()
+    assert contenido.startswith(b"%PDF-") and b"/Subtype /Image" in contenido     # con el logo
     vacio = Informe("Estado de membresías y cupos", "Al 13/11/2026", ["Socio"], [])
     exportar_pdf(vacio, tmp_path / "vacio.pdf")
     assert load_workbook(exportar_excel(vacio, tmp_path / "vacio.xlsx")).active.max_row >= 3

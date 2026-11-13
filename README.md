@@ -3,7 +3,8 @@
 **Autora:** Magali Laureano · IES N°7 Populorum Progressio
 
 Aplicación de escritorio (Python 3.12 + PySide6 + PostgreSQL 16) para el
-gimnasio ZebraGym:
+gimnasio ZebraGym, en Av. Corrientes 2833, Y4600 San Salvador de Jujuy, Jujuy
+(barrio San Pedrito):
 
 - Los **socios** entran mirando a la cámara.
 - Los **entrenadores** marcan su llegada y su salida con la cara.
@@ -109,6 +110,10 @@ Las reglas de los casos especiales, como el pago parcial, la renovación
 anticipada o el fichaje fuera de turno, están en
 [`docs/casos_especiales.md`](docs/casos_especiales.md).
 
+El nombre, la dirección y el logo del gimnasio se configuran en un solo
+lugar: `src/config/gimnasio.py`. De ahí los toman el pie del login y el
+encabezado de los informes exportados.
+
 ## Estructura
 
 ```
@@ -119,7 +124,7 @@ asistencia-facial/
 ├── scripts/                cargar_socio_prueba.py
 ├── src/
 │   ├── main.py
-│   ├── config/             conexión a PostgreSQL
+│   ├── config/             conexión a PostgreSQL y datos del gimnasio
 │   ├── hardware/           cámara
 │   ├── repositories/       consultas SQL por tabla
 │   ├── services/           reglas de negocio, permisos y reconocimiento facial

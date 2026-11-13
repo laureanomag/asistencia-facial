@@ -95,10 +95,11 @@ def test_sin_base_de_datos_la_ventana_igual_abre(app):
 
 def test_pie_del_login_sale_del_horario(app):
     from ui.login_window import LoginWindow, pie_login
-    assert pie_login(_HorarioFalso()) == "San Pedrito, Jujuy · Lun a Vie 7:30–23 · Sáb 10–14"
-    assert pie_login(_HorarioFalso(falla=True)) == "San Pedrito, Jujuy"
+    direccion = "Av. Corrientes 2833 · San Pedrito, San Salvador de Jujuy"
+    assert pie_login(_HorarioFalso()) == f"{direccion}\nLun a Vie 7:30–23 · Sáb 10–14"
+    assert pie_login(_HorarioFalso(falla=True)) == direccion
     login = LoginWindow(auth_service=object(), horario_service=_HorarioFalso())
-    assert login.pie.text() == "San Pedrito, Jujuy · Lun a Vie 7:30–23 · Sáb 10–14"
+    assert login.pie.text() == f"{direccion}\nLun a Vie 7:30–23 · Sáb 10–14"
 
 
 @pytest.mark.parametrize("nombre, esperado", [

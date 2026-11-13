@@ -11,14 +11,16 @@ from ui.componentes import con_rol, etiqueta, logo
 
 
 def pie_login(horario_service):
-    """'San Pedrito, Jujuy · Lun a Vie 7:30–23 · Sáb 10–14', armado desde
-    horario_atencion. Sin conexión a la base muestra solo la ubicación."""
+    """Dirección del gimnasio y, debajo, el horario armado desde horario_atencion:
+    'Av. Corrientes 2833 · San Pedrito, San Salvador de Jujuy\nLun a Vie 7:30–23 · Sáb 10–14'.
+    Sin conexión a la base muestra solo la dirección."""
+    from config.gimnasio import DIRECCION_CORTA
     from services.horario_service import resumen_horario
     try:
         resumen = resumen_horario(horario_service.franjas_semana())
     except Exception:
         resumen = ""
-    return f"{tema.UBICACION} · {resumen}" if resumen else tema.UBICACION
+    return f"{DIRECCION_CORTA}\n{resumen}" if resumen else DIRECCION_CORTA
 
 
 class LoginWindow(QWidget):
@@ -56,6 +58,7 @@ class LoginWindow(QWidget):
         lema = etiqueta(tema.LEMA, "subtitulo")
         lema.setStyleSheet("font-size: 16px;")
         self.pie = etiqueta(pie_login(self._horario), "secundario")
+        self.pie.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         columna = QVBoxLayout(lado)
         columna.addStretch()
         columna.addWidget(logo(264), alignment=Qt.AlignmentFlag.AlignHCenter)

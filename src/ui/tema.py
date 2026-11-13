@@ -8,13 +8,14 @@ from pathlib import Path
 
 from PySide6.QtGui import QFont, QFontDatabase, QIcon
 
+from config import gimnasio
+
 RAIZ = Path(__file__).resolve().parents[2]
 ASSETS = RAIZ / "assets"
-LOGO = ASSETS / "logo.png"
+LOGO = gimnasio.LOGO
 FUENTES = ("Montserrat[wght].ttf", "Inter[opsz,wght].ttf")
 
-NOMBRE_GIMNASIO = "ZebraGym"
-UBICACION = "San Pedrito, Jujuy"
+NOMBRE_GIMNASIO = gimnasio.NOMBRE      # nombre y dirección: config/gimnasio.py
 LEMA = "Control de acceso por reconocimiento facial"
 
 # Paleta
