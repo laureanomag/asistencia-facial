@@ -146,7 +146,7 @@ class ModalConfirmacion(QDialog):
         persona.addLayout(textos, 1)
         columna.addLayout(persona)
 
-        # Datos: tarjetas (socio: plan, vence, estado contable; empleado: rol,
+        # Datos: tarjetas (socio: plan, esta semana, vence, estado contable; empleado: rol,
         # turno, hora y estado) o una línea por condición (socio y empleado).
         tarjetas = evaluacion.get("tarjetas", [])
         if tarjetas:

@@ -17,8 +17,8 @@ PROPUESTA_ANA = {
         "nombre": "Juan Pérez", "dni": "30.111.222", "rol_texto": "Socio", "modo": "socio",
         "opciones": [{"clave": "entrenar", "boton": "Entrar", "habilitada": True, "motivo": None}],
         "sugerida": "entrenar",
-        "tarjetas": [["Plan", "3 veces por semana", None], ["Vence", "05/12 · en 23 días", None],
-                     ["Estado contable", "Al día", "verde"]],
+        "tarjetas": [["Plan", "3 veces por semana", None], ["Esta semana", "2 de 3 días", None],
+                     ["Vence", "05/12 · en 23 días", None], ["Estado contable", "Al día", "verde"]],
         "advertencias": [], "lineas": [],
     },
 }
@@ -313,6 +313,8 @@ def test_modal_del_socio(app):
     m = _modal(PROPUESTA_ANA["evaluacion"])
     assert (m.titulo.text(), m.encabezado.text()) == ("¡Hola, Juan!", "¿Confirmás tu entrada al gimnasio?")
     assert m.cuenta.text() == "Se cancela solo en 60 s"
+    texto = _textos_visibles(m)
+    assert "Esta semana" in texto and "2 de 3 días" in texto
     assert [b.text() for b in m.botones_opcion.values()] == ["Entrar"]
     assert m.botones_opcion["entrenar"].property("rol") == "primario"
     m.botones_opcion["entrenar"].click()

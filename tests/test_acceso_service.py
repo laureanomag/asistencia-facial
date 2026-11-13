@@ -118,8 +118,8 @@ def test_socio_habilitado_propone_ingreso_sin_escribir():
     assert [(o.clave, o.boton) for o in ev.opciones] == [(ENTRENAR, "Entrar")]
     assert ev.mensaje == "¿Confirmás tu entrada al gimnasio?" and ev.sugerida == ENTRENAR
     assert (ev.nombre, ev.dni, ev.rol_texto) == ("Juan Pérez", "30.111.222", "Socio")
-    assert ev.tarjetas == (("Plan", "3 veces por semana", None), ("Vence", "05/12 · en 23 días", None),
-                           ("Estado contable", "Al día", "verde"))
+    assert ev.tarjetas == (("Plan", "3 veces por semana", None), ("Esta semana", "2 de 3 días", None),
+                           ("Vence", "05/12 · en 23 días", None), ("Estado contable", "Al día", "verde"))
     assert (m.rechazos, m.permitidos) == ([], [])
 
 
@@ -161,7 +161,7 @@ def test_pago_parcial_permite_y_advierte():
     m = Mundo(estado_socio=estado(saldo=Decimal("8000"), estado_contable="debe"))
     ev = servicio(m).evaluar(1)
     assert ev.estado == PROPUESTA and ev.advertencias == ()      # la deuda ya está en la tarjeta
-    assert ev.tarjetas[2] == ("Estado contable", "Debe $8.000,00", "rojo")
+    assert ev.tarjetas[3] == ("Estado contable", "Debe $8.000,00", "rojo")
 
 
 TURNO_TARDE = (1, time(14, 0), time(22, 0), "jornada")
@@ -366,5 +366,13 @@ def test_formatos():
     assert dni_texto("30111222") == "30.111.222" and dni_texto("1234567") == "1.234.567"
     assert tarjetas_socio(estado(max_dias_semanales=None, dias_entrenados_semana=1,
                                  dias_para_vencer=1, estado_contable="por_vencer"))[1:] == (
-        ("Vence", "05/12 · mañana", None),
+        ("Esta semana", "1 día", None), ("Vence", "05/12 · mañana", None),
         ("Estado contable", "Por vencer", "ambar"))
+
+
+def test_esta_semana_con_y_sin_limite_semanal():
+    from services.acceso_service import texto_semana
+    assert texto_semana(2, 3) == "2 de 3 días"
+    assert texto_semana(2, None) == "2 días"
+    assert texto_semana(1, None) == "1 día"
+    assert texto_semana(0, None) == "0 días"

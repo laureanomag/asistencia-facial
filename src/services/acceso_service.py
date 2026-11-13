@@ -103,8 +103,15 @@ class Confirmacion:
     momento: object = None
 
 
+def texto_semana(dias, maximo):
+    """'2 de 3 días' si el plan tiene límite semanal; si no, '2 días' (o '1 día')."""
+    if maximo:
+        return f"{dias} de {maximo} días"
+    return "1 día" if dias == 1 else f"{dias} días"
+
+
 def tarjetas_socio(estado):
-    """Plan / Vence / Estado contable."""
+    """Plan / Esta semana / Vence / Estado contable."""
     restantes = estado["dias_para_vencer"]
     cuando = "mañana" if restantes == 1 else f"en {restantes} días"
     vence = f"{estado['fecha_vencimiento'].strftime('%d/%m')} · {cuando}"
@@ -115,7 +122,8 @@ def tarjetas_socio(estado):
         contable = ("Por vencer", "ambar")
     else:
         contable = ("Al día", "verde")
-    return (("Plan", estado["plan"], None), ("Vence", vence, None),
+    semana = texto_semana(estado["dias_entrenados_semana"], estado["max_dias_semanales"])
+    return (("Plan", estado["plan"], None), ("Esta semana", semana, None), ("Vence", vence, None),
             ("Estado contable", contable[0], contable[1]))
 
 
