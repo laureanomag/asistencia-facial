@@ -94,7 +94,7 @@ class SociosPage(QWidget):
 
         # --- Lista ---
         self.busqueda = QLineEdit()
-        self.busqueda.setPlaceholderText("Buscar por DNI, nombre o apellido")
+        self.busqueda.setPlaceholderText("DNI o nombre")
         self.busqueda.returnPressed.connect(self.cargar_lista)
         self.busqueda.textChanged.connect(lambda texto: self.cargar_lista() if not texto else None)
         buscar = QPushButton("Buscar")
@@ -117,14 +117,14 @@ class SociosPage(QWidget):
         columna_l.addWidget(self.error_lista)
         columna_l.addWidget(self.lista_vacia)
         columna_l.addWidget(self.tabla, 1)
-        lista.setMinimumWidth(360)
-        lista.setMaximumWidth(460)
+        lista.setMinimumWidth(320)
+        lista.setMaximumWidth(400)
 
         fila = QHBoxLayout(self)
         fila.setContentsMargins(0, 0, 0, 0)
         fila.setSpacing(20)
         fila.addWidget(desplazable, 1)
-        fila.addWidget(lista, 1)
+        fila.addWidget(lista)
 
     def showEvent(self, evento):
         super().showEvent(evento)
