@@ -9,7 +9,8 @@ Cada foto se revisa con el mismo detector que usa la carga de referencias
 Lo usan el script de prueba y la pantalla Socios."""
 from PySide6.QtWidgets import QDialog, QMessageBox
 
-INDICACION_PERFIL = "Girá levemente la cabeza hacia tu {lado}, unos 15°: que se vean los dos ojos."
+# La vista previa no está en espejo, así que la indicación habla del lado de la persona.
+INDICACION_PERFIL = "Girá la cabeza levemente hacia tu {lado} (unos 15°), que se vean los dos ojos."
 ANGULOS = (
     ("frente", "Frente", "Mirá a la cámara, con buena luz de frente."),
     ("perfil_izquierdo", "Perfil izquierdo", INDICACION_PERFIL.format(lado="izquierda")),
