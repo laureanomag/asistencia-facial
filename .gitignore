@@ -15,6 +15,7 @@ __pycache__/
 # Excepciones puntuales: identidad visual y diseños de referencia (no son rostros)
 !assets/logo.png
 !docs/diseno/*.png
+!docs/capturas/*.png
 deepface_models/
 weights/
 
