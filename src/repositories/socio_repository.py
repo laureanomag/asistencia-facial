@@ -81,6 +81,13 @@ class SocioRepository:
             cur.execute(query, {"t": texto, "limite": limite})
             return cur.fetchall()
 
+    def listar_estados(self, conn=None):
+        """v_socio_estado de todos los socios activos (dicts), por apellido."""
+        query = f"SELECT {', '.join(COLUMNAS_ESTADO)} FROM v_socio_estado ORDER BY apellido, nombre;"
+        with usar_conexion(conn) as c, c.cursor() as cur:
+            cur.execute(query)
+            return [dict(zip(COLUMNAS_ESTADO, fila)) for fila in cur.fetchall()]
+
     def obtener_estado(self, socio_id, conn=None):
         """Estado del socio según la vista v_socio_estado, como dict con las
         claves de COLUMNAS_ESTADO, o None si no existe o está dado de baja.
