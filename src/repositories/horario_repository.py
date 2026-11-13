@@ -30,6 +30,25 @@ class HorarioRepository:
             cur.execute(query)
             return cur.fetchall()
 
+    def crear_franja(self, dia_semana, apertura, cierre, conn=None):
+        query = """
+            INSERT INTO horario_atencion (dia_semana, hora_apertura, hora_cierre)
+            VALUES (%s, %s, %s) RETURNING id;
+        """
+        with usar_conexion(conn) as c, c.cursor() as cur:
+            cur.execute(query, (dia_semana, apertura, cierre))
+            return cur.fetchone()[0]
+
+    def actualizar_franja(self, franja_id, apertura, cierre, activo, conn=None):
+        """Las franjas no se borran: se desactivan (un día sin franjas activas = cerrado)."""
+        query = """
+            UPDATE horario_atencion SET hora_apertura = %s, hora_cierre = %s, activo = %s
+             WHERE id = %s;
+        """
+        with usar_conexion(conn) as c, c.cursor() as cur:
+            cur.execute(query, (apertura, cierre, activo, franja_id))
+            return cur.rowcount == 1
+
     def ahora(self, conn=None):
         """Fecha y hora actuales de Argentina según el servidor de base de
         datos: el mismo reloj que usa v_socio_estado, así la app y la vista
