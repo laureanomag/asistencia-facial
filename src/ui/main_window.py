@@ -413,4 +413,6 @@ FABRICAS = {
     "estado": _por_modulo("ui.estado_socio_page", "EstadoSocioPage"),
     "configuracion": _por_modulo("ui.configuracion_page", "ConfiguracionPage"),
     "informes": _por_modulo("ui.informes_page", "InformesPage"),
+    "jornadas": _por_modulo("ui.jornadas_page", "JornadasPage"),
+    "fichajes": _por_modulo("ui.fichajes_page", "FichajesPage"),
 }

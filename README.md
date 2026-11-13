@@ -101,6 +101,7 @@ Las capturas están en [`docs/capturas/`](docs/capturas) y usan datos de muestra
 | ![Socios](docs/capturas/08_socios.png) | ![Cobros](docs/capturas/09_cobros.png) |
 | ![Estado del socio](docs/capturas/10_estado_socio.png) | ![Configuración](docs/capturas/11_configuracion.png) |
 | ![Informes](docs/capturas/12_informes.png) | ![Menú de la cuenta](docs/capturas/13_menu_cuenta.png) |
+| ![Jornadas](docs/capturas/14_jornadas.png) | ![Fichajes](docs/capturas/15_fichajes.png) |
 
 Las reglas de los casos especiales, como el pago parcial, la renovación
 anticipada o el fichaje fuera de turno, están en

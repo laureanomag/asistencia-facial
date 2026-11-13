@@ -144,6 +144,14 @@ def hoja_de_estilos():
         font-family: "{titulos}"; font-size: 24px; font-weight: 800;
     }}
 
+    /* Casillas */
+    QCheckBox {{ spacing: 8px; }}
+    QCheckBox::indicator {{
+        width: 18px; height: 18px; border-radius: 5px; border: 1px solid {TEXTO_SECUNDARIO};
+        background: {FONDO};
+    }}
+    QCheckBox::indicator:checked {{ background: {DORADO}; border-color: {DORADO}; }}
+
     /* Tablas */
     QTableWidget, QTableView {{
         background: transparent; border: none; gridline-color: {BORDE};
