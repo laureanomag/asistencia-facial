@@ -409,4 +409,5 @@ FABRICAS = {
     "panel": _por_modulo("ui.panel_page", "PanelPage"),
     "empleados": _por_modulo("ui.empleados_page", "EmpleadosPage"),
     "socios": _por_modulo("ui.socios_page", "SociosPage"),
+    "cobros": _por_modulo("ui.cobros_page", "CobrosPage"),
 }
