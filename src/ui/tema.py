@@ -120,6 +120,9 @@ def hoja_de_estilos():
         padding: 0 20px; min-height: 44px; font-size: 15px; font-weight: 600;
     }}
     QPushButton:hover {{ border-color: {TEXTO_SECUNDARIO}; }}
+    QLineEdit:disabled, QDateEdit:disabled, QSpinBox:disabled, QComboBox:disabled, QTimeEdit:disabled {{
+        color: #5A5A5A; background: {FONDO};
+    }}
     QPushButton:disabled {{ color: #5A5A5A; }}
     QPushButton[rol="primario"] {{
         background: {DORADO}; color: {FONDO}; border: none; font-weight: 700;

@@ -1,12 +1,16 @@
-"""Configuración (solo la dueña): precios y límites de los planes y franjas
-del horario de atención.
+"""Configuración (solo la dueña): precios y límites de los planes y el
+horario de atención de la semana.
 
 - Un plan con precio $0 se puede guardar (así viene del seed) pero no se
   vende hasta que tenga precio (ver CobroService).
 - Cambiar un plan no modifica las membresías ya vendidas: copian el precio y
   los límites al venderse.
-- Las franjas no se borran: se desactivan. No pueden superponerse con otra
-  franja activa del mismo día."""
+- Horario: un renglón por día (lunes a domingo) con "Abierto", apertura y
+  cierre. Al guardar, un día abierto queda con una sola franja activa de
+  horario_atencion (se actualiza la existente o se crea) y un día cerrado
+  desactiva sus franjas. Nunca se borra nada."""
+from datetime import time
+
 from config.database import usar_conexion
 from services.auth_service import CONFIGURACION_GESTIONAR, autorizar
 from services.cobro_service import parsear_monto
@@ -51,24 +55,31 @@ def validar_plan(datos):
     return errores, valores
 
 
-def validar_franja(dia, apertura, cierre, franjas, franja_id=None):
-    """franjas: filas de HorarioRepository.listar (id, dia, apertura, cierre, activo)."""
-    errores = {}
-    if dia not in DIAS:
-        errores["dia"] = "Elegí el día."
-    if apertura is None or cierre is None or cierre <= apertura:
-        errores["cierre"] = "La hora de cierre tiene que ser posterior a la de apertura."
-        return errores
-    for fid, fdia, fabre, fcierra, factiva in franjas:
-        if fid == franja_id or fdia != dia:
-            continue
-        if fabre == apertura and franja_id is None:
-            errores["apertura"] = ("Ya hay una franja que abre a esa hora ese día"
-                                   + (": activala en la lista." if not factiva else "."))
-        elif factiva and apertura < fcierra and fabre < cierre:
-            errores["apertura"] = (f"Se superpone con la franja de {fabre.strftime('%H:%M')} a "
-                                   f"{fcierra.strftime('%H:%M')}.")
-    return errores
+HORARIO_POR_DEFECTO = (time(8, 0), time(20, 0))      # para un día que nunca abrió
+
+
+def horario_semanal(franjas):
+    """{dia: (abierto, apertura, cierre)} para los 7 días a partir de las filas de
+    HorarioRepository.listar (id, dia, apertura, cierre, activo). Un día abierto
+    muestra su primera franja activa; uno cerrado, la última que tuvo (o 8 a 20)."""
+    semana = {}
+    for dia in DIAS:
+        del_dia = [f for f in franjas if f[1] == dia]
+        activas = [f for f in del_dia if f[4]]
+        if activas:
+            semana[dia] = (True, activas[0][2], activas[0][3])
+        elif del_dia:
+            semana[dia] = (False, del_dia[-1][2], del_dia[-1][3])
+        else:
+            semana[dia] = (False, *HORARIO_POR_DEFECTO)
+    return semana
+
+
+def validar_horario(semana):
+    """Errores por día {dia: mensaje}: el cierre tiene que ser posterior a la apertura."""
+    return {dia: "El cierre tiene que ser posterior a la apertura."
+            for dia, (abierto, apertura, cierre) in semana.items()
+            if abierto and (apertura is None or cierre is None or cierre <= apertura)}
 
 
 class ConfiguracionService:
@@ -98,27 +109,34 @@ class ConfiguracionService:
 
     # --- Horario de atención ---
 
-    def franjas(self, sesion):
+    def horario(self, sesion):
         autorizar(sesion, CONFIGURACION_GESTIONAR)
-        return self._horario.listar()
+        return horario_semanal(self._horario.listar())
 
-    def agregar_franja(self, sesion, dia, apertura, cierre):
+    def guardar_horario(self, sesion, semana):
+        """semana: {dia: (abierto, apertura, cierre)}. Abierto: una sola franja
+        activa con esas horas (la que ya abría a esa hora, la primera activa o una
+        nueva). Cerrado: se desactivan sus franjas. No se borra nada."""
         autorizar(sesion, CONFIGURACION_GESTIONAR)
-        with self._transaccion() as conn:
-            errores = validar_franja(dia, apertura, cierre, self._horario.listar(conn=conn))
-            if errores:
-                raise ErroresConfiguracion(errores)
-            return self._horario.crear_franja(dia, apertura, cierre, conn=conn)
-
-    def cambiar_activa(self, sesion, franja_id, activa):
-        autorizar(sesion, CONFIGURACION_GESTIONAR)
+        errores = validar_horario(semana)
+        if errores:
+            raise ErroresConfiguracion(errores)
         with self._transaccion() as conn:
             franjas = self._horario.listar(conn=conn)
-            franja = next((f for f in franjas if f[0] == franja_id), None)
-            if franja is None:
-                raise ErroresConfiguracion({"franja": "La franja ya no existe."})
-            if activa:
-                errores = validar_franja(franja[1], franja[2], franja[3], franjas, franja_id)
-                if errores:
-                    raise ErroresConfiguracion(errores)
-            return self._horario.actualizar_franja(franja_id, franja[2], franja[3], activa, conn=conn)
+            for dia, (abierto, apertura, cierre) in semana.items():
+                del_dia = [f for f in franjas if f[1] == dia]
+                elegida = None
+                if abierto:
+                    # (dia, apertura) es único: si ya hay una fila que abre a esa hora, se reutiliza.
+                    elegida = next((f for f in del_dia if f[2] == apertura), None) \
+                        or next((f for f in del_dia if f[4]), None)
+                for fid, _dia, f_abre, f_cierra, activa in del_dia:
+                    if activa and (elegida is None or fid != elegida[0]):
+                        self._horario.actualizar_franja(fid, f_abre, f_cierra, False, conn=conn)
+                if not abierto:
+                    continue
+                if elegida is None:
+                    self._horario.crear_franja(dia, apertura, cierre, conn=conn)
+                elif (elegida[2], elegida[3], elegida[4]) != (apertura, cierre, True):
+                    self._horario.actualizar_franja(elegida[0], apertura, cierre, True, conn=conn)
+        return True

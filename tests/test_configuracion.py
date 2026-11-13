@@ -6,13 +6,12 @@ from decimal import Decimal
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
-from PySide6.QtCore import QTime  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from apoyo_db import membresia, persona, requiere_base, socio, valor  # noqa: E402
 from services.auth_service import ADMINISTRADOR, ENTRENADOR, AccesoDenegado, Sesion  # noqa: E402
 from services.configuracion_service import (  # noqa: E402
-    ConfiguracionService, ErroresConfiguracion, validar_franja, validar_plan,
+    ConfiguracionService, ErroresConfiguracion, horario_semanal, validar_horario, validar_plan,
 )
 from ui import tema  # noqa: E402
 
@@ -43,15 +42,16 @@ def test_validar_plan():
     assert validar_plan({"precio": "0"})[0] == {}           # se guarda en 0, pero no se vende
 
 
-def test_validar_franja():
-    assert validar_franja(6, time(14, 0), time(16, 0), FRANJAS) == {}
-    assert validar_franja(6, time(16, 0), time(18, 0), FRANJAS) == {
-        "apertura": "Ya hay una franja que abre a esa hora ese día: activala en la lista."}
-    assert validar_franja(6, time(13, 0), time(15, 0), FRANJAS) == {
-        "apertura": "Se superpone con la franja de 10:00 a 14:00."}
-    assert validar_franja(7, time(12, 0), time(11, 0), FRANJAS) == {
-        "cierre": "La hora de cierre tiene que ser posterior a la de apertura."}
-    assert validar_franja(6, time(16, 30), time(17, 0), FRANJAS) == {}   # la desactivada no se superpone
+def test_horario_semanal_y_validacion():
+    semana = horario_semanal(FRANJAS)
+    assert semana[1] == (True, time(7, 30), time(23, 0))
+    assert semana[6] == (True, time(10, 0), time(14, 0))     # la primera franja activa
+    assert semana[7] == (False, time(8, 0), time(20, 0))     # nunca abrió: 8 a 20 por defecto
+    assert horario_semanal([(9, 7, time(9, 0), time(12, 0), False)])[7] == (False, time(9, 0), time(12, 0))
+    assert validar_horario(semana) == {}
+    semana[2] = (True, time(12, 0), time(11, 0))
+    semana[3] = (False, time(12, 0), time(11, 0))            # cerrado: no se valida
+    assert validar_horario(semana) == {2: "El cierre tiene que ser posterior a la apertura."}
 
 
 # --- Servicio contra la base ---
@@ -73,25 +73,57 @@ def test_precio_nuevo_no_cambia_lo_ya_vendido(db):
         servicio.planes(PROFE)
 
 
+def _filas(db):
+    return [tuple(f) for f in db.execute(
+        "SELECT id, dia_semana, hora_apertura, hora_cierre, activo FROM horario_atencion ORDER BY id")]
+
+
 @requiere_base
-def test_franjas_se_agregan_y_se_desactivan(db):
+def test_guardar_horario_sin_borrar_nada(db):
     servicio = ConfiguracionService()
-    franja = servicio.agregar_franja(DUENIA, 7, time(9, 0), time(12, 0))
-    assert (7, time(9, 0), time(12, 0), True) in [f[1:] for f in servicio.franjas(DUENIA)]
+    antes = _filas(db)                                        # seed: lunes a viernes y sábado
+    semana = servicio.horario(DUENIA)
+    assert semana[1] == (True, time(7, 30), time(23, 0)) and semana[7][0] is False
+    semana[1] = (True, time(8, 0), time(22, 0))               # se actualiza la franja del lunes
+    semana[6] = (False, *semana[6][1:])                       # el sábado se cierra
+    semana[7] = (True, time(9, 0), time(12, 0))               # el domingo abre: franja nueva
+    servicio.guardar_horario(DUENIA, semana)
+    despues = _filas(db)
+    assert len(despues) == len(antes) + 1                     # no se borró nada
+    lunes = [f for f in despues if f[1] == 1]
+    assert [(f[2], f[3], f[4]) for f in lunes] == [(time(8, 0), time(22, 0), True)]
+    assert [f[4] for f in despues if f[1] == 6] == [False]
+    assert [(f[2], f[3], f[4]) for f in despues if f[1] == 7] == [(time(9, 0), time(12, 0), True)]
+    assert servicio.horario(DUENIA)[6] == (False, time(10, 0), time(14, 0))
+
+    semana = servicio.horario(DUENIA)
+    semana[6] = (True, time(10, 0), time(13, 0))              # reabre: reutiliza su franja
+    servicio.guardar_horario(DUENIA, semana)
+    assert len(_filas(db)) == len(despues)
+    assert servicio.horario(DUENIA)[6] == (True, time(10, 0), time(13, 0))
+
+
+@requiere_base
+def test_un_dia_abierto_queda_con_una_sola_franja_activa(db):
+    db.execute("INSERT INTO horario_atencion (dia_semana, hora_apertura, hora_cierre) VALUES (6, '16:00', '18:00')")
+    servicio = ConfiguracionService()
+    semana = servicio.horario(DUENIA)
+    semana[6] = (True, time(16, 0), time(20, 0))              # coincide con la franja de las 16
+    servicio.guardar_horario(DUENIA, semana)
+    sabado = [f for f in _filas(db) if f[1] == 6]
+    assert [(f[2], f[4]) for f in sabado] == [(time(10, 0), False), (time(16, 0), True)]
+    semana[6] = (True, time(12, 0), time(11, 0))
     with pytest.raises(ErroresConfiguracion):
-        servicio.agregar_franja(DUENIA, 7, time(11, 0), time(13, 0))
-    servicio.cambiar_activa(DUENIA, franja, False)
-    assert valor(db, "SELECT activo FROM horario_atencion WHERE id = %s", (franja,)) is False
-    assert valor(db, "SELECT COUNT(*) FROM horario_atencion WHERE id = %s", (franja,)) == 1   # no se borra
-    servicio.cambiar_activa(DUENIA, franja, True)
-    assert valor(db, "SELECT activo FROM horario_atencion WHERE id = %s", (franja,)) is True
+        servicio.guardar_horario(DUENIA, semana)
+    with pytest.raises(AccesoDenegado):
+        servicio.horario(PROFE)
 
 
 # --- Pantalla ---
 
 class ServicioFalso:
     def __init__(self):
-        self.guardados, self.agregadas, self.cambios = [], [], []
+        self.guardados, self.horarios = [], []
 
     def planes(self, sesion):
         return [(1, "Pase por día", "1 day", None, None, 1, Decimal("0"), True),
@@ -100,14 +132,11 @@ class ServicioFalso:
     def guardar_plan(self, sesion, plan_id, datos):
         self.guardados.append((plan_id, datos["precio"]))
 
-    def franjas(self, sesion):
-        return FRANJAS
+    def horario(self, sesion):
+        return horario_semanal(FRANJAS)
 
-    def agregar_franja(self, sesion, dia, apertura, cierre):
-        self.agregadas.append((dia, apertura, cierre))
-
-    def cambiar_activa(self, sesion, franja_id, activa):
-        self.cambios.append((franja_id, activa))
+    def guardar_horario(self, sesion, semana):
+        self.horarios.append(semana)
 
 
 def _pagina(app):
@@ -134,18 +163,20 @@ def test_editar_plan(app):
 
 
 def test_horario(app):
-    from ui.tablas import textos
     pagina = _pagina(app)
-    assert [f[:3] for f in textos(pagina.tabla_franjas)] == [
-        ["Lunes", "07:30", "23:00"], ["Sábado", "10:00", "14:00"], ["Sábado", "16:00", "18:00"]]
-    pagina.dia.setCurrentIndex(pagina.dia.findData(6))
-    pagina.apertura.setTime(QTime(13, 0))
-    pagina.cierre.setTime(QTime(15, 0))
-    pagina.agregar_franja()
-    assert pagina.campos_franja["apertura"].mensaje.text() == "Se superpone con la franja de 10:00 a 14:00."
-    pagina.apertura.setTime(QTime(14, 0))
-    pagina.agregar_franja()
-    assert pagina.servicio.agregadas == [(6, time(14, 0), time(15, 0))]
-    pagina.cambiar_activa(1, False)
-    assert pagina.servicio.cambios == [(1, False)]
-    assert pagina.mensaje_horario.text() == "Franja desactivada: ese horario queda cerrado."
+    lunes, sabado, domingo = pagina.dias[1], pagina.dias[6], pagina.dias[7]
+    assert lunes.abierto.isChecked() and lunes.apertura.time().toString("HH:mm") == "07:30"
+    assert not domingo.abierto.isChecked() and not domingo.apertura.isEnabled() and not domingo.cierre.isEnabled()
+    domingo.abierto.setChecked(True)
+    assert domingo.apertura.isEnabled() and domingo.cierre.isEnabled()
+    domingo.cierre.setTime(domingo.apertura.time().addSecs(-3600))
+    pagina.guardar_horario()
+    assert domingo.campo_cierre.mensaje.text() == "El cierre tiene que ser posterior a la apertura."
+    assert pagina.servicio.horarios == []
+    domingo.cierre.setTime(domingo.apertura.time().addSecs(3 * 3600))
+    sabado.abierto.setChecked(False)
+    pagina.guardar_horario()
+    (guardado,) = pagina.servicio.horarios
+    assert guardado[7] == (True, time(8, 0), time(11, 0)) and guardado[6][0] is False
+    assert len(guardado) == 7 and not domingo.campo_cierre.tiene_error()
+    assert pagina.mensaje_horario.text() == "Se guardó el horario de atención."

@@ -30,8 +30,10 @@ en la base y dónde está la regla en el código.
 - **Empleados:** pueden fichar aunque el gimnasio esté cerrado.
 - **Socio que también es empleado:** "Entrenar" aparece deshabilitado con el
   motivo, y "Trabajar" sigue disponible.
-- **Configuración:** las franjas se agregan sin superponerse y se activan o
-  desactivan. Nunca se borran.
+- **Configuración:** una tabla con los 7 días, cada uno con "Abierto", apertura
+  y cierre. Al guardar, un día abierto queda con una sola franja activa con
+  esas horas (se actualiza la existente o se crea) y un día cerrado desactiva
+  sus franjas. Nunca se borra nada.
 
 ## Socio sin membresía
 

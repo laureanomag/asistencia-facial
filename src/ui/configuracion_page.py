@@ -1,20 +1,19 @@
-"""Configuración (solo la dueña): planes con precio y límites, y franjas del
-horario de atención (se agregan y se activan o desactivan)."""
+"""Configuración (solo la dueña): planes con precio y límites, y el horario
+de atención: un renglón por día con "Abierto", apertura y cierre."""
 from datetime import time
 from decimal import Decimal
 
 from PySide6.QtCore import QTime, Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLineEdit, QPushButton, QScrollArea,
-    QTimeEdit, QVBoxLayout, QWidget,
+    QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLineEdit, QPushButton, QScrollArea, QTimeEdit,
+    QVBoxLayout, QWidget,
 )
 
-from services.configuracion_service import ErroresConfiguracion, validar_franja, validar_plan
+from services.configuracion_service import ErroresConfiguracion, validar_horario, validar_plan
 from services.horario_service import DIAS
 from services.reglas_ingreso import pesos
 from ui import tema
 from ui.componentes import CampoFormulario, EtiquetaEstado, con_rol, etiqueta
-from ui.tablas import crear_tabla, llenar
 
 VIGENCIAS = {"1 day": "1 día", "1 mon": "1 mes", "7 days": "1 semana"}
 
@@ -95,6 +94,39 @@ class EditorPlan(QFrame):
         self.mensaje.show()
 
 
+class DiaHorario:
+    """Renglón de un día: casilla Abierto y horas de apertura y cierre
+    (deshabilitadas si el día está cerrado). El error va debajo del cierre."""
+
+    def __init__(self, dia):
+        self.dia = dia
+        self.nombre = etiqueta(DIAS[dia].capitalize(), "etiqueta")
+        self.abierto = QCheckBox("Abierto")
+        self.apertura, self.cierre = QTimeEdit(), QTimeEdit()
+        for campo in (self.apertura, self.cierre):
+            campo.setDisplayFormat("HH:mm")
+        self.campo_cierre = CampoFormulario("", self.cierre)
+        self.campo_cierre.etiqueta.hide()
+        self.abierto.toggled.connect(self._habilitar)
+
+    def _habilitar(self, abierto):
+        self.apertura.setEnabled(abierto)
+        self.cierre.setEnabled(abierto)
+        if not abierto:
+            self.campo_cierre.limpiar_error()
+
+    def mostrar(self, abierto, apertura, cierre):
+        self.abierto.setChecked(abierto)
+        self.apertura.setTime(QTime(apertura.hour, apertura.minute))
+        self.cierre.setTime(QTime(cierre.hour, cierre.minute))
+        self._habilitar(abierto)
+
+    def valores(self):
+        def hora(campo):
+            return time(campo.time().hour(), campo.time().minute())
+        return self.abierto.isChecked(), hora(self.apertura), hora(self.cierre)
+
+
 class ConfiguracionPage(QWidget):
     def __init__(self, sesion, servicio=None):
         super().__init__()
@@ -103,7 +135,6 @@ class ConfiguracionPage(QWidget):
             servicio = ConfiguracionService()
         self.sesion, self.servicio = sesion, servicio
         self.editores = []
-        self._franjas = []
 
         # --- Planes ---
         self.lista_planes = QVBoxLayout()
@@ -124,38 +155,36 @@ class ConfiguracionPage(QWidget):
         columna_p.addLayout(self.lista_planes)
 
         # --- Horario ---
-        self.dia = QComboBox()
-        for numero, nombre in DIAS.items():
-            self.dia.addItem(nombre.capitalize(), numero)
-        self.apertura, self.cierre = QTimeEdit(QTime(7, 30)), QTimeEdit(QTime(23, 0))
-        for campo in (self.apertura, self.cierre):
-            campo.setDisplayFormat("HH:mm")
-        self.campos_franja = {"dia": CampoFormulario("Día", self.dia),
-                              "apertura": CampoFormulario("Abre", self.apertura),
-                              "cierre": CampoFormulario("Cierra", self.cierre)}
-        agregar = con_rol(QPushButton("Agregar franja"), "primario")
-        agregar.clicked.connect(self.agregar_franja)
+        self.dias = {dia: DiaHorario(dia) for dia in DIAS}
+        grilla = QGridLayout()
+        grilla.setHorizontalSpacing(16)
+        grilla.setVerticalSpacing(8)
+        for columna, titulo in enumerate(("Día", "", "Abre", "Cierra")):
+            grilla.addWidget(etiqueta(titulo, "dato-titulo"), 0, columna)
+        arriba = Qt.AlignmentFlag.AlignTop
+        for fila, renglon in enumerate(self.dias.values(), start=1):
+            grilla.addWidget(renglon.nombre, fila, 0, Qt.AlignmentFlag.AlignVCenter)
+            grilla.addWidget(renglon.abierto, fila, 1, Qt.AlignmentFlag.AlignVCenter)
+            grilla.addWidget(renglon.apertura, fila, 2, arriba)
+            grilla.addWidget(renglon.campo_cierre, fila, 3, arriba)
+        grilla.setColumnStretch(2, 1)
+        grilla.setColumnStretch(3, 1)
+        guardar = con_rol(QPushButton("Guardar cambios"), "primario")
+        guardar.clicked.connect(self.guardar_horario)
         self.mensaje_horario = etiqueta("", "ok")
         self.mensaje_horario.setWordWrap(True)
         self.mensaje_horario.hide()
-        fila_franja = QHBoxLayout()
-        for campo in self.campos_franja.values():
-            fila_franja.addWidget(campo, 1)
-        fila_franja.addWidget(agregar, 0, Qt.AlignmentFlag.AlignBottom)
-        self.tabla_franjas = crear_tabla(("Día", "Abre", "Cierra", "Estado", ""))
-        self.tabla_franjas.setMinimumHeight(330)
+        pie = QHBoxLayout()
+        pie.addWidget(self.mensaje_horario, 1)
+        pie.addWidget(guardar)
         horario = con_rol(QFrame(), "panel")
         columna_h = QVBoxLayout(horario)
         columna_h.setContentsMargins(24, 20, 24, 20)
         columna_h.setSpacing(12)
         columna_h.addWidget(etiqueta("Horario de atención", "titulo-panel"))
-        ayuda_h = etiqueta("Un día sin franjas activas es un día cerrado. Las franjas no se borran: "
-                           "se desactivan.", "secundario")
-        ayuda_h.setWordWrap(True)
-        columna_h.addWidget(ayuda_h)
-        columna_h.addLayout(fila_franja)
-        columna_h.addWidget(self.mensaje_horario)
-        columna_h.addWidget(self.tabla_franjas)
+        columna_h.addWidget(etiqueta("Días y horarios en que el gimnasio está abierto.", "secundario"))
+        columna_h.addLayout(grilla)
+        columna_h.addLayout(pie)
 
         contenido = QWidget()
         columna = QVBoxLayout(contenido)
@@ -179,7 +208,7 @@ class ConfiguracionPage(QWidget):
 
     def cargar(self):
         self.cargar_planes()
-        self.cargar_franjas()
+        self.cargar_horario()
 
     # --- Planes ---
 
@@ -211,57 +240,36 @@ class ConfiguracionPage(QWidget):
 
     # --- Horario ---
 
-    def cargar_franjas(self):
+    def cargar_horario(self):
         try:
-            self._franjas = list(self.servicio.franjas(self.sesion))
+            semana = self.servicio.horario(self.sesion)
         except Exception as error:
             self._avisar_horario(f"No se pudo consultar el horario. {error}", "error")
             return
-        filas = []
-        for franja_id, dia, apertura, cierre, activa in self._franjas:
-            boton = QPushButton("Desactivar" if activa else "Activar")
-            boton.setMinimumHeight(34)
-            boton.clicked.connect(lambda _c=False, f=franja_id, a=activa: self.cambiar_activa(f, not a))
-            filas.append([DIAS[dia].capitalize(), apertura.strftime("%H:%M"), cierre.strftime("%H:%M"),
-                          EtiquetaEstado("Activa" if activa else "Desactivada", "verde" if activa else "neutro"),
-                          boton])
-        llenar(self.tabla_franjas, filas)
+        for dia, renglon in self.dias.items():
+            renglon.mostrar(*semana[dia])
 
-    def _hora(self, campo):
-        valor = campo.time()
-        return time(valor.hour(), valor.minute())
-
-    def agregar_franja(self):
+    def guardar_horario(self):
         self.mensaje_horario.hide()
-        dia, apertura, cierre = self.dia.currentData(), self._hora(self.apertura), self._hora(self.cierre)
-        errores = validar_franja(dia, apertura, cierre, self._franjas)
+        semana = {dia: renglon.valores() for dia, renglon in self.dias.items()}
+        errores = validar_horario(semana)
         if not errores:
             try:
-                self.servicio.agregar_franja(self.sesion, dia, apertura, cierre)
+                self.servicio.guardar_horario(self.sesion, semana)
             except ErroresConfiguracion as error:
                 errores = error.errores
             except Exception as error:
-                self._avisar_horario(f"No se pudo agregar la franja. {error}", "error")
+                self._avisar_horario(f"No se pudo guardar el horario. {error}", "error")
                 return
-        for nombre, campo in self.campos_franja.items():
-            campo.mostrar_error(errores[nombre]) if nombre in errores else campo.limpiar_error()
+        for dia, renglon in self.dias.items():
+            if dia in errores:
+                renglon.campo_cierre.mostrar_error(errores[dia])
+            else:
+                renglon.campo_cierre.limpiar_error()
         if errores:
             return
-        self.cargar_franjas()
-        self._avisar_horario(f"Se agregó {DIAS[dia]} de {apertura:%H:%M} a {cierre:%H:%M}.", "ok")
-
-    def cambiar_activa(self, franja_id, activa):
-        try:
-            self.servicio.cambiar_activa(self.sesion, franja_id, activa)
-        except ErroresConfiguracion as error:
-            self._avisar_horario(" ".join(error.errores.values()), "error")
-            return
-        except Exception as error:
-            self._avisar_horario(f"No se pudo cambiar la franja. {error}", "error")
-            return
-        self.cargar_franjas()
-        self._avisar_horario("Franja activada." if activa else "Franja desactivada: ese horario queda cerrado.",
-                             "ok")
+        self._avisar_horario("Se guardó el horario de atención.", "ok")
+        self.cargar_horario()
 
     def _avisar_horario(self, texto, rol):
         self.mensaje_horario.setText(texto)
