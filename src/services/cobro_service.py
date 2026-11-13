@@ -5,9 +5,9 @@ Reglas:
 - No se vende un plan con precio $0 (los planes del seed vienen en 0 hasta
   que la dueña carga los precios en Configuración).
 - El pago puede ser parcial: el saldo queda como deuda en Estado del socio.
-- Renovación anticipada: si el socio todavía tiene una membresía que no
-  venció, la nueva empieza el día en que vence la actual (no se pierden días).
-  Lo mismo al cambiar de plan.
+- La membresía comienza el día en que se registra el pago (trabajo final,
+  punto 6.3), también en la renovación anticipada y en el cambio de plan: el
+  plan nuevo reemplaza al actual desde ese día.
 - El vencimiento lo calcula PostgreSQL (fecha_inicio + vigencia del plan):
   20/10 -> 20/11 y 31/01 -> 28/02 (29/02 en año bisiesto).
 - La membresía y su pago se guardan en una sola transacción."""
@@ -59,15 +59,6 @@ def parsear_monto(texto):
     return monto.quantize(Decimal("0.01")) if monto.is_finite() else None
 
 
-def fecha_inicio_nueva(membresias, hoy):
-    """Hoy, o el vencimiento de la última membresía no cancelada si todavía no
-    llegó (renovación anticipada o cambio de plan).
-    membresias: filas de MembresiaRepository.listar_por_socio."""
-    vencimientos = [m[3] for m in membresias if m[5] != "cancelada"]
-    ultimo = max(vencimientos, default=None)
-    return ultimo if ultimo is not None and ultimo > hoy else hoy
-
-
 def validar_cobro(plan, monto_texto, metodo, maximo=None):
     """(errores por campo, monto). plan: fila de listar_planes o None.
     maximo: tope del monto (el precio del plan o el saldo)."""
@@ -114,7 +105,7 @@ class CobroService:
 
     def buscar_socio(self, sesion, dni):
         """dict con el socio del DNI, su estado y la fecha en que empezaría un
-        plan nuevo, o None si no es socio. Lanza DatosInvalidos si el DNI es inválido."""
+        plan nuevo (hoy, el día del pago), o None si no es socio. Lanza DatosInvalidos si el DNI es inválido."""
         autorizar(sesion, PAGO_REGISTRAR)
         dni = normalizar_dni(dni)
         with self._transaccion() as conn:
@@ -126,7 +117,7 @@ class CobroService:
             membresias = self._membresias.listar_por_socio(socio[0], conn=conn)
             return {"socio_id": socio[0], "nombre": f"{persona[2]} {persona[3]}", "activo": socio[5],
                     "estado": self._socios.obtener_estado(socio[0], conn=conn),
-                    "membresias": membresias, "inicio_nueva": fecha_inicio_nueva(membresias, hoy),
+                    "membresias": membresias, "inicio_nueva": hoy,
                     "pagos": self._membresias.listar_pagos_por_socio(socio[0], 5, conn=conn)}
 
     def vencimiento(self, plan_id, fecha_inicio):
@@ -146,8 +137,7 @@ class CobroService:
                 raise ReglaDeCobro(" ".join(errores.values()))
             if not plan[7]:
                 raise ReglaDeCobro(f"El plan {plan[1]} no está a la venta.")
-            hoy = self._horario.ahora(conn=conn).date()
-            inicio = fecha_inicio_nueva(self._membresias.listar_por_socio(socio_id, conn=conn), hoy)
+            inicio = self._horario.ahora(conn=conn).date()     # el día del pago
             membresia_id, vence, precio = self._membresias.crear(socio_id, plan_id, inicio,
                                                                  sesion.usuario_id, conn=conn)
             self._membresias.registrar_pago(membresia_id, monto, metodo, sesion.usuario_id, conn=conn)

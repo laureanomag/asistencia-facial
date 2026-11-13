@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from apoyo_db import HOY_AR, membresia, persona, requiere_base, socio, valor  # noqa: E402
 from services.auth_service import ADMINISTRADOR, ENTRENADOR, AccesoDenegado, Sesion  # noqa: E402
 from services.cobro_service import (  # noqa: E402
-    CobroService, ReglaDeCobro, fecha_inicio_nueva, parsear_monto, validar_cobro,
+    CobroService, ReglaDeCobro, parsear_monto, validar_cobro,
 )
 from ui import tema  # noqa: E402
 
@@ -53,17 +53,6 @@ def test_validacion_del_monto_y_el_medio_de_pago():
     assert validar_cobro(None, "", "efectivo")[0].keys() == {"plan", "monto"}
 
 
-def test_renovacion_anticipada_empieza_cuando_vence_la_actual():
-    hoy = date(2026, 11, 13)
-    vigente = (1, "Pase libre", date(2026, 10, 20), date(2026, 11, 20), 100, "activa", 100)
-    assert fecha_inicio_nueva([vigente], hoy) == date(2026, 11, 20)
-    vencida = (1, "Pase libre", date(2026, 9, 20), date(2026, 10, 20), 100, "activa", 100)
-    assert fecha_inicio_nueva([vencida], hoy) == hoy
-    cancelada = vigente[:5] + ("cancelada", 0)
-    assert fecha_inicio_nueva([cancelada], hoy) == hoy
-    assert fecha_inicio_nueva([], hoy) == hoy
-
-
 # --- Servicio contra la base ---
 
 def _precio(db, plan, precio):
@@ -91,17 +80,31 @@ def test_venta_con_pago_parcial_y_saldo(db):
 
 
 @requiere_base
-def test_renovacion_anticipada_y_cambio_de_plan(db):
+def test_cambio_de_plan_empieza_el_dia_del_pago(db):
     sid = socio(db, persona(db))
     membresia(db, sid, desde=-5)                                  # Pase libre vigente
     plan_id = _precio(db, "3 veces por semana", 18000)
     servicio = CobroService()
-    actual = valor(db, "SELECT fecha_vencimiento FROM membresia WHERE socio_id = %s", (sid,))
-    assert servicio.buscar_socio(PROFE, "30111222")["inicio_nueva"] == actual
+    hoy = valor(db, f"SELECT {HOY_AR}")
+    assert servicio.buscar_socio(PROFE, "30111222")["inicio_nueva"] == hoy
     venta = servicio.vender(PROFE, sid, plan_id, Decimal("18000"), "mercado_pago")
-    assert venta.fecha_inicio == actual and venta.plan == "3 veces por semana"
-    # El plan actual sigue vigente hasta que empieza el nuevo.
-    assert servicio.buscar_socio(PROFE, "30111222")["estado"]["plan"] == "Pase libre"
+    assert venta.fecha_inicio == hoy and venta.plan == "3 veces por semana"
+    assert venta.fecha_vencimiento == valor(db, "SELECT (%s::date + INTERVAL '1 month')::date", (hoy,))
+    # El plan nuevo reemplaza al actual desde hoy.
+    assert servicio.buscar_socio(PROFE, "30111222")["estado"]["plan"] == "3 veces por semana"
+
+
+@requiere_base
+def test_renovacion_anticipada_empieza_el_dia_del_pago(db):
+    sid = socio(db, persona(db))
+    membresia(db, sid, desde=-25)                                 # Pase libre que vence en pocos días
+    plan_id = _precio(db, "Pase libre", 25000)
+    servicio = CobroService()
+    hoy = valor(db, f"SELECT {HOY_AR}")
+    venta = servicio.vender(PROFE, sid, plan_id, Decimal("25000"), "efectivo")
+    assert venta.fecha_inicio == hoy
+    estado = servicio.buscar_socio(PROFE, "30111222")["estado"]
+    assert (estado["membresia_id"], estado["fecha_inicio"]) == (venta.membresia_id, hoy)
 
 
 @requiere_base
@@ -176,7 +179,7 @@ def test_buscar_y_cobrar(app):
     assert pagina.ficha.text() == "Juan Pérez" and pagina.venta.isVisible()
     assert pagina.plan.currentText() == "Pase libre · $25.000,00"          # el plan que tenía
     assert pagina.monto.text() == "25.000,00"
-    assert pagina.periodo.text().startswith("Empieza el 13/11/2026 y vence el 13/12/2026")
+    assert pagina.periodo.text().startswith("Empieza hoy, 13/11/2026, y vence el 13/12/2026")
     pagina.cobrar()
     assert pagina.campos["metodo"].mensaje.text() == "Elegí cómo paga."      # al lado del campo
     pagina.metodo.setCurrentIndex(pagina.metodo.findData("efectivo"))

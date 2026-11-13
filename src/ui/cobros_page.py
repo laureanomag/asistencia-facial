@@ -246,12 +246,11 @@ class CobrosPage(QWidget):
             vence = self.servicio.vencimiento(plan[0], inicio)
         except Exception:
             vence = None
-        texto = f"Empieza el {fecha_texto(inicio)}"
+        texto = f"Empieza hoy, {fecha_texto(inicio)}"
         if vence:
-            texto += f" y vence el {fecha_texto(vence)} (ese día ya tiene que renovar)"
-        anticipada = (self.socio["estado"] or {}).get("estado_membresia") in ("vigente", "agotada", "no_vigente")
-        if anticipada:
-            texto += ". Renovación anticipada: empieza cuando vence el plan actual"
+            texto += f", y vence el {fecha_texto(vence)} (ese día ya tiene que renovar)"
+        if (self.socio["estado"] or {}).get("estado_membresia") in ("vigente", "agotada", "no_vigente"):
+            texto += ". Reemplaza al plan actual desde hoy"
         self.periodo.setText(texto + ".")
 
     # --- Cobros ---

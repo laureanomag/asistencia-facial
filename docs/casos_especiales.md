@@ -47,27 +47,28 @@ Cada rechazo queda en la tabla `acceso` y aparece en Informes.
 
 ## Renovación anticipada
 
-Si el socio renueva antes de que venza su plan, el plan nuevo **empieza el día
-en que vence el actual**, así que no pierde días.
+La membresía **comienza el día en que se registra el pago** (trabajo final,
+punto 6.3), aunque el plan anterior todavía no haya vencido.
 
 - **Ejemplo:** tiene un Pase libre del 20/10 al 20/11 y renueva el 13/11. El
-  nuevo va del 20/11 al 20/12.
-- **Mientras tanto:** Estado del socio sigue mostrando el plan vigente hasta
-  que empieza el nuevo.
-- **En pantalla:** Cobros y renovaciones lo avisa con "Renovación anticipada:
-  empieza cuando vence el plan actual".
-- **Código:** `services/cobro_service.py`, `fecha_inicio_nueva`.
+  nuevo va del 13/11 al 13/12 y reemplaza al anterior desde ese día.
+- **En pantalla:** Cobros y renovaciones muestra "Empieza hoy, dd/mm/aaaa, y
+  vence el …" y, si tenía un plan vigente, "Reemplaza al plan actual desde hoy".
+- **Estado del socio:** muestra el plan nuevo desde el día del pago. Si dos
+  membresías están vigentes a la vez, `v_socio_estado` toma la que empezó más
+  tarde.
+- **Código:** `services/cobro_service.py`, `CobroService.vender`.
 
 ## Cambio de plan
 
-Funciona igual que la renovación anticipada: el plan nuevo empieza cuando
-vence el actual.
+Funciona igual que la renovación anticipada: el plan nuevo **empieza el día del
+pago** y reemplaza al actual desde ese día.
 
+- **Ejemplo:** tiene un Pase libre vigente y el 13/11 paga "3 veces por
+  semana". Desde el 13/11 entra con los límites del plan nuevo.
 - **Condiciones copiadas:** cada membresía copia el precio y los límites del
   plan en el momento de la venta. Si la dueña cambia un plan en Configuración,
   las membresías ya vendidas no cambian.
-- **Pendiente:** cambiar de plan en el acto, cancelando el actual, no está
-  disponible en la interfaz. Si hace falta, se agrega como una función aparte.
 
 ## Meses de 28 a 31 días
 
