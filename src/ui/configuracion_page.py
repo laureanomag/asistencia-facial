@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from services.configuracion_service import ErroresConfiguracion, validar_horario, validar_plan
+from services.configuracion_service import ErroresConfiguracion, aviso_cupo, validar_horario, validar_plan
 from services.horario_service import DIAS
 from services.reglas_ingreso import pesos
 from ui import tema
@@ -28,7 +28,7 @@ class EditorPlan(QFrame):
     def __init__(self, plan, guardar):
         super().__init__()
         con_rol(self, "tarjeta-dato")
-        self.plan_id, self.nombre = plan[0], plan[1]
+        self.plan_id, self.nombre, self.vigencia = plan[0], plan[1], plan[2]
         self._guardar = guardar
         self.precio = QLineEdit(pesos(plan[6]).replace("$", ""))
         self.cupo = QLineEdit(_texto(plan[3]))
@@ -44,6 +44,8 @@ class EditorPlan(QFrame):
             "dias_semana": CampoFormulario("Días por semana", self.dias_semana),
             "ingresos_dia": CampoFormulario("Ingresos por día", self.ingresos_dia),
         }
+        for campo in (self.cupo, self.dias_semana):
+            campo.textChanged.connect(self.revisar_cupo)
         self.boton = con_rol(QPushButton("Guardar"), "primario")
         self.boton.clicked.connect(self.guardar)
         self.mensaje = etiqueta("", "ok")
@@ -70,6 +72,18 @@ class EditorPlan(QFrame):
         columna_p.addLayout(titulo)
         columna_p.addLayout(grilla)
         columna_p.addLayout(pie)
+        self.revisar_cupo()
+
+    def revisar_cupo(self, *_):
+        """Aviso en ámbar si "Accesos en la vigencia" no alcanza para todos los días permitidos."""
+        _errores, valores = validar_plan(self.datos())
+        aviso = aviso_cupo(valores["cupo"], valores["dias_semana"], self.vigencia)
+        campo = self.campos["cupo"]
+        if aviso:
+            campo.mostrar_aviso(aviso)
+        elif campo.mensaje.property("rol") == "advertencia":
+            campo.limpiar_error()
+        return aviso
 
     def datos(self):
         return {"precio": self.precio.text(), "cupo": self.cupo.text(), "dias_semana": self.dias_semana.text(),
@@ -78,6 +92,8 @@ class EditorPlan(QFrame):
     def mostrar_errores(self, errores):
         for nombre, campo in self.campos.items():
             campo.mostrar_error(errores[nombre]) if nombre in errores else campo.limpiar_error()
+        if "cupo" not in errores:
+            self.revisar_cupo()
 
     def guardar(self):
         self.mensaje.hide()

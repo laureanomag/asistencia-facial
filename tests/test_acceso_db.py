@@ -1,5 +1,6 @@
 """Flujo de ingreso completo contra el esquema real (AccesoService + repositorios).
 Ver tests/apoyo_db.py: se ejecutan solo con ZEBRAGYM_TEST_DSN y nunca dejan datos."""
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -97,3 +98,77 @@ def test_empleado_con_entrada_recien_registrada(abierto_todo_el_dia):
 def test_no_reconocido(db):
     AccesoService().registrar_no_reconocido(Decimal("0.6120"))
     assert _accesos(db) == [("rechazado", r.NO_RECONOCIDO)]
+
+
+# --- Plan "3 veces por semana": 3 días por semana, 1 ingreso por día, sin cupo total ---
+
+def _tres_por_semana(db, socio_id, desde=-10):
+    db.execute("UPDATE plan SET entrenamientos_mensuales = NULL, max_dias_semanales = 3, "
+               "max_ingresos_diarios = 1 WHERE nombre = '3 veces por semana'")
+    return membresia(db, socio_id, plan="3 veces por semana", desde=desde)
+
+
+def _ingreso(db, socio_id, membresia_id, fecha):
+    db.execute("INSERT INTO acceso (socio_id, membresia_id, resultado, fecha_hora) "
+               "VALUES (%s, %s, 'permitido', (%s::date + TIME '10:00') AT TIME ZONE 'America/Argentina/Buenos_Aires')",
+               (socio_id, membresia_id, fecha))
+
+
+def _semana(db):
+    """(hoy, días de esta semana distintos de hoy, lunes de esta semana)."""
+    hoy = valor(db, "SELECT (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date")
+    lunes = hoy - timedelta(days=hoy.weekday())
+    return hoy, [lunes + timedelta(days=i) for i in range(7) if lunes + timedelta(days=i) != hoy], lunes
+
+
+def test_tres_dias_en_la_semana_y_el_cuarto_es_limite_semanal(abierto_todo_el_dia):
+    db = abierto_todo_el_dia
+    pid = persona(db)
+    s = socio(db, pid)
+    mid = _tres_por_semana(db, s)
+    _hoy, otros, _lunes = _semana(db)
+    for fecha in otros[:3]:
+        _ingreso(db, s, mid, fecha)
+    ev = AccesoService().evaluar(pid)
+    assert (ev.estado, ev.motivo) == (RECHAZADO, r.LIMITE_SEMANAL)
+
+
+def test_un_ingreso_por_dia(abierto_todo_el_dia):
+    db = abierto_todo_el_dia
+    pid = persona(db)
+    s = socio(db, pid)
+    _tres_por_semana(db, s)
+    servicio = AccesoService()
+    assert servicio.confirmar(servicio.evaluar(pid), ENTRENAR).registrado
+    ev = servicio.evaluar(pid)
+    assert (ev.estado, ev.motivo) == (RECHAZADO, r.LIMITE_DIARIO)
+    assert ev.mensaje == "Su plan permite 1 ingreso por día y hoy ya lo usó."
+
+
+def test_la_semana_nueva_empieza_de_cero_y_no_compensa(abierto_todo_el_dia):
+    db = abierto_todo_el_dia
+    pid = persona(db)
+    s = socio(db, pid)
+    mid = _tres_por_semana(db, s, desde=-20)
+    _hoy, otros, lunes = _semana(db)
+    for dias in (7, 6, 5):                                   # 3 días la semana pasada
+        _ingreso(db, s, mid, lunes - timedelta(days=dias))
+    assert AccesoService().evaluar(pid).estado == PROPUESTA    # esta semana vuelve a entrar
+    # Una semana en que no vino no le suma días a la siguiente.
+    for fecha in otros[:3]:
+        _ingreso(db, s, mid, fecha)
+    assert AccesoService().evaluar(pid).motivo == r.LIMITE_SEMANAL
+
+
+def test_sin_cupo_total_no_se_agota_en_el_mes(abierto_todo_el_dia):
+    db = abierto_todo_el_dia
+    pid = persona(db)
+    s = socio(db, pid)
+    mid = _tres_por_semana(db, s, desde=-28)
+    _hoy, _otros, lunes = _semana(db)
+    for semana in range(1, 5):                               # 3 días por semana, 4 semanas: 12 ingresos
+        for dia in range(3):
+            _ingreso(db, s, mid, lunes - timedelta(weeks=semana) + timedelta(days=dia))
+    estado = valor(db, "SELECT estado_membresia FROM v_socio_estado WHERE socio_id = %s", (s,))
+    assert estado == "vigente"
+    assert AccesoService().evaluar(pid).estado == PROPUESTA

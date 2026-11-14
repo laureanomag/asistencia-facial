@@ -5,10 +5,16 @@ horario de atención de la semana.
   vende hasta que tenga precio (ver CobroService).
 - Cambiar un plan no modifica las membresías ya vendidas: copian el precio y
   los límites al venderse.
+- Aviso (no impide guardar): si "Accesos en la vigencia" es menor que
+  días por semana × semanas que puede tocar la vigencia, el socio se queda sin
+  cupo antes de que venza. Un mes puede tocar 5 semanas (empieza y termina a
+  mitad de semana): con 3 días por semana, al menos 15.
 - Horario: un renglón por día (lunes a domingo) con "Abierto", apertura y
   cierre. Al guardar, un día abierto queda con una sola franja activa de
   horario_atencion (se actualiza la existente o se crea) y un día cerrado
   desactiva sus franjas. Nunca se borra nada."""
+import math
+import re
 from datetime import time
 
 from config.database import usar_conexion
@@ -53,6 +59,35 @@ def validar_plan(datos):
             errores[campo] = error
         valores[campo] = valor
     return errores, valores
+
+
+def semanas_de_la_vigencia(vigencia):
+    """Semanas (de lunes a domingo) que puede tocar la vigencia del plan: cada
+    mes cuenta 5 (empieza y termina a mitad de semana) y los días, de a 7.
+    vigencia: texto de PostgreSQL ('1 mon', '1 day', '7 days')."""
+    meses = dias = 0
+    for cantidad, unidad in re.findall(r"(\d+)\s*(year|mon|week|day)", str(vigencia or "")):
+        cantidad = int(cantidad)
+        if unidad == "year":
+            meses += 12 * cantidad
+        elif unidad == "mon":
+            meses += cantidad
+        else:
+            dias += cantidad * (7 if unidad == "week" else 1)
+    return meses * 5 + math.ceil(dias / 7)
+
+
+def aviso_cupo(cupo, dias_semana, vigencia):
+    """Texto del aviso si "Accesos en la vigencia" no alcanza para venir todos los
+    días permitidos hasta que venza, o None (sin cupo o sin límite semanal)."""
+    if not cupo or not dias_semana:
+        return None
+    minimo = dias_semana * semanas_de_la_vigencia(vigencia)
+    if cupo >= minimo:
+        return None
+    return (f"Con {dias_semana} días por semana puede entrenar hasta {minimo} veces en la vigencia: "
+            f"con {cupo} accesos se queda sin cupo antes de que venza. "
+            f"Dejalo vacío (sin límite) o poné al menos {minimo}.")
 
 
 HORARIO_POR_DEFECTO = (time(8, 0), time(20, 0))      # para un día que nunca abrió

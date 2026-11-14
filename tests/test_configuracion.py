@@ -11,7 +11,8 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from apoyo_db import membresia, persona, requiere_base, socio, valor  # noqa: E402
 from services.auth_service import ADMINISTRADOR, ENTRENADOR, AccesoDenegado, Sesion  # noqa: E402
 from services.configuracion_service import (  # noqa: E402
-    ConfiguracionService, ErroresConfiguracion, horario_semanal, validar_horario, validar_plan,
+    ConfiguracionService, ErroresConfiguracion, aviso_cupo, horario_semanal, semanas_de_la_vigencia,
+    validar_horario, validar_plan,
 )
 from ui import tema  # noqa: E402
 
@@ -67,6 +68,10 @@ def test_precio_nuevo_no_cambia_lo_ya_vendido(db):
     fila = next(p for p in servicio.planes(DUENIA) if p[0] == plan[0])
     assert (fila[3], fila[4], fila[5], fila[6]) == (12, None, 1, Decimal("25000.00"))
     assert valor(db, "SELECT precio FROM membresia WHERE id = %s", (mid,)) == Decimal("20000")
+    servicio.guardar_plan(DUENIA, plan[0], {"precio": "25.000", "cupo": "", "dias_semana": "3",
+                                            "ingresos_dia": "1", "activo": True})
+    fila = next(p for p in servicio.planes(DUENIA) if p[0] == plan[0])
+    assert (fila[3], fila[4], fila[5]) == (None, 3, 1)         # "Accesos en la vigencia" sin límite
     with pytest.raises(ErroresConfiguracion):
         servicio.guardar_plan(DUENIA, plan[0], {"precio": "-1"})
     with pytest.raises(AccesoDenegado):
@@ -160,6 +165,35 @@ def test_editar_plan(app):
     pase_dia.guardar()
     assert pagina.servicio.guardados == [(1, "3.000")]
     assert pase_dia.mensaje.text() == "Se guardó Pase por día."
+
+
+def test_semanas_y_aviso_de_cupo():
+    assert [semanas_de_la_vigencia(v) for v in ("1 mon", "1 day", "7 days", "3 mons", "1 year")] == [5, 1, 1, 15, 60]
+    assert aviso_cupo(3, 3, "1 mon") == (
+        "Con 3 días por semana puede entrenar hasta 15 veces en la vigencia: con 3 accesos se queda "
+        "sin cupo antes de que venza. Dejalo vacío (sin límite) o poné al menos 15.")
+    assert aviso_cupo(12, 3, "1 mon") is not None             # un mes puede tocar 5 semanas
+    assert aviso_cupo(15, 3, "1 mon") is None
+    assert aviso_cupo(None, 3, "1 mon") is None                # sin límite
+    assert aviso_cupo(8, None, "1 mon") is None                # sin límite semanal
+    assert aviso_cupo(1, 1, "1 day") is None                   # pase por día
+
+
+def test_aviso_de_cupo_en_pantalla_no_impide_guardar(app):
+    pagina = _pagina(app)
+    _pase, libre = pagina.editores
+    campo = libre.campos["cupo"]
+    libre.dias_semana.setText("3")
+    libre.cupo.setText("3")
+    assert campo.mensaje.property("rol") == "advertencia" and "al menos 15" in campo.mensaje.text()
+    assert not campo.tiene_error()
+    libre.guardar()
+    assert pagina.servicio.guardados == [(3, "25.000,00")]     # es un aviso: guarda igual
+    assert campo.mensaje.property("rol") == "advertencia"
+    libre.cupo.setText("15")
+    assert not campo.mensaje.isVisible()
+    libre.cupo.setText("")                                     # sin límite
+    assert not campo.mensaje.isVisible()
 
 
 def test_horario(app):

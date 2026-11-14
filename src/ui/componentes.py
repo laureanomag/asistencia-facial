@@ -293,6 +293,15 @@ class CampoFormulario(QWidget):
         for widget in (self.mensaje, self.campo):
             tema.refrescar_estilo(widget)
 
+    def mostrar_aviso(self, texto):
+        """Aviso en ámbar debajo del campo: no es un error, no impide guardar."""
+        self.mensaje.setText(texto)
+        self.mensaje.setProperty("rol", "advertencia")
+        self.mensaje.show()
+        self.campo.setProperty("error", False)
+        for widget in (self.mensaje, self.campo):
+            tema.refrescar_estilo(widget)
+
     def limpiar_error(self):
         self.mensaje.setText(self._ayuda)
         self.mensaje.setProperty("rol", "secundario")

@@ -193,6 +193,7 @@ def hoja_de_estilos():
     QLabel[rol="numero-panel"] {{ font-family: "{titulos}"; font-size: 30px; font-weight: 800; }}
     QLabel[rol="error"] {{ color: {ROJO}; font-size: 13px; }}
     QLabel[rol="ok"] {{ color: {VERDE}; font-size: 13px; }}
+    QLabel[rol="advertencia"] {{ color: {AMBAR}; font-size: 13px; }}
     QLineEdit[error="true"], QComboBox[error="true"] {{ border: 1px solid {ROJO}; }}
     QComboBox QAbstractItemView {{
         background: {PANEL}; border: 1px solid {BORDE}; selection-background-color: {DORADO};

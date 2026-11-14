@@ -81,6 +81,22 @@ pago** y reemplaza al actual desde ese día.
   membresía nueva. En cualquier otro caso (renovación, plan vencido, pase de
   otro día, de un pase a otro pase) se cobra el precio completo.
 
+## Plan "3 veces por semana"
+
+Es estricto: hasta 3 días distintos por semana (de lunes a domingo) y 1 ingreso
+por día. Lo controlan "Días por semana" e "Ingresos por día" del plan.
+
+- El cuarto día de la misma semana se rechaza con "Límite semanal". El lunes
+  siguiente vuelve a entrar.
+- Un segundo ingreso el mismo día se rechaza con "Ya ingresó hoy".
+- Las semanas en que no vino no se compensan.
+- "Accesos en la vigencia" (cupo total) va vacío, sin límite. Si se carga,
+  Configuración avisa cuando es menor que días por semana × 5 (un mes puede
+  tocar 5 semanas, porque empieza y termina a mitad de semana): con 3 días por
+  semana, al menos 15. Es un aviso y no impide guardar.
+- Cada membresía copia los límites del plan al venderse: cambiar el plan no
+  cambia las membresías ya vendidas.
+
 ## Meses de 28 a 31 días
 
 El vencimiento lo calcula PostgreSQL como `fecha_inicio + plan.vigencia`. La
