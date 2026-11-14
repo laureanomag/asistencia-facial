@@ -17,7 +17,8 @@ from ui.componentes import EtiquetaEstado, con_rol, etiqueta
 from ui.estados import dni_con_puntos, estado_contable, estado_membresia
 from ui.tablas import crear_tabla, llenar
 
-ESTADO_MEMBRESIA_GUARDADO = {"activa": "Activa", "suspendida": "Suspendida", "cancelada": "Cancelada"}
+# 'cancelada' es como queda la membresía anterior al vender un plan nuevo.
+ESTADO_MEMBRESIA_GUARDADO = {"activa": "Activa", "suspendida": "Suspendida", "cancelada": "Cerrada"}
 
 
 def confirmar(parent, titulo, texto):

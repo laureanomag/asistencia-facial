@@ -7,12 +7,19 @@ Reglas:
 - El pago puede ser parcial: el saldo queda como deuda en Estado del socio.
 - La membresía comienza el día en que se registra el pago (trabajo final,
   punto 6.3), también en la renovación anticipada y en el cambio de plan: el
-  plan nuevo reemplaza al actual desde ese día.
+  plan nuevo reemplaza al actual desde ese día, y las membresías anteriores
+  quedan cerradas ('cancelada', el único estado cerrado del esquema).
+- Descuento solo en un caso: si el socio tiene un Pase por día que empezó hoy
+  y cambia ese mismo día a un plan mensual, se descuenta lo que pagó por el
+  pase (Pase por día $3.000 + "3 veces por semana" $40.000 -> cobrar $37.000).
+  El descuento queda en el precio de la membresía nueva. En cualquier otro
+  caso (renovación, plan vencido, pase de otro día) se cobra el precio completo.
 - El vencimiento lo calcula PostgreSQL (fecha_inicio + vigencia del plan):
   20/10 -> 20/11 y 31/01 -> 28/02 (29/02 en año bisiesto).
 - La membresía y su pago se guardan en una sola transacción."""
 import re
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from config.database import usar_conexion
@@ -34,8 +41,9 @@ class Venta:
     plan: str
     fecha_inicio: object
     fecha_vencimiento: object
-    precio: Decimal
+    precio: Decimal                 # lo que cuesta la membresía (con el descuento, si hubo)
     pagado: Decimal
+    descuento: Decimal = Decimal("0")
 
     @property
     def saldo(self):
@@ -57,6 +65,24 @@ def parsear_monto(texto):
     except InvalidOperation:
         return None
     return monto.quantize(Decimal("0.01")) if monto.is_finite() else None
+
+
+def es_mensual(plan):
+    """plan: fila de listar_planes; vigencia como texto ('1 mon', '1 day')."""
+    return plan is not None and str(plan[2]).strip() in ("1 mon", "1 month", "1 mons")
+
+
+def descuento_por_cambio(membresias, plan, hoy):
+    """Lo que se descuenta al vender `plan`: lo pagado por un Pase por día que
+    empezó hoy, solo si el plan nuevo es mensual. Si no, 0.
+    membresias: filas de MembresiaRepository.listar_por_socio
+    (id, plan, inicio, vencimiento, precio, estado, pagado)."""
+    if not es_mensual(plan):
+        return Decimal("0")
+    pases_de_hoy = [m for m in membresias
+                    if m[5] == "activa" and m[2] == hoy and m[3] == hoy + timedelta(days=1)]
+    descuento = sum((Decimal(m[6]) for m in pases_de_hoy), Decimal("0"))
+    return min(descuento, Decimal(plan[6]))
 
 
 def validar_cobro(plan, monto_texto, metodo, maximo=None):
@@ -132,16 +158,21 @@ class CobroService:
             if socio is None or not socio[5]:
                 raise ReglaDeCobro("El socio está dado de baja: la dueña puede reactivarlo en Estado del socio.")
             plan = self._membresias.obtener_plan(plan_id, conn=conn)
-            errores, monto = validar_cobro(plan, str(monto).replace(".", ","), metodo)
+            inicio = self._horario.ahora(conn=conn).date()     # el día del pago
+            descuento = descuento_por_cambio(self._membresias.listar_por_socio(socio_id, conn=conn), plan, inicio) \
+                if plan is not None else Decimal("0")
+            a_cobrar = Decimal(plan[6]) - descuento if plan is not None else None
+            errores, monto = validar_cobro(plan, str(monto).replace(".", ","), metodo, maximo=a_cobrar)
             if errores:
                 raise ReglaDeCobro(" ".join(errores.values()))
             if not plan[7]:
                 raise ReglaDeCobro(f"El plan {plan[1]} no está a la venta.")
-            inicio = self._horario.ahora(conn=conn).date()     # el día del pago
-            membresia_id, vence, precio = self._membresias.crear(socio_id, plan_id, inicio,
-                                                                 sesion.usuario_id, conn=conn)
+            # El plan nuevo reemplaza al anterior: las membresías activas quedan cerradas.
+            self._membresias.cerrar_activas(socio_id, conn=conn)
+            membresia_id, vence, precio = self._membresias.crear(
+                socio_id, plan_id, inicio, sesion.usuario_id, precio=a_cobrar if descuento else None, conn=conn)
             self._membresias.registrar_pago(membresia_id, monto, metodo, sesion.usuario_id, conn=conn)
-        return Venta(membresia_id, plan[1], inicio, vence, Decimal(precio), monto)
+        return Venta(membresia_id, plan[1], inicio, vence, Decimal(precio), monto, descuento)
 
     def pagar_saldo(self, sesion, socio_id, membresia_id, monto, metodo):
         """Pago de lo que falta de una membresía (pago parcial anterior)."""

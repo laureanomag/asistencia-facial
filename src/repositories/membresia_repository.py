@@ -52,22 +52,23 @@ class MembresiaRepository:
 
     # --- Membresías ---
 
-    def crear(self, socio_id, plan_id, fecha_inicio, registrado_por_usuario_id=None, conn=None):
+    def crear(self, socio_id, plan_id, fecha_inicio, registrado_por_usuario_id=None, precio=None, conn=None):
         """Crea la membresía copiando del plan el precio y los límites vigentes.
+        precio: si se indica, reemplaza al del plan (cambio de plan con descuento).
         Devuelve (id, fecha_vencimiento, precio)."""
         query = """
             INSERT INTO membresia
                 (socio_id, plan_id, fecha_inicio, fecha_vencimiento, precio,
                  entrenamientos_mensuales, max_dias_semanales, max_ingresos_diarios,
                  registrado_por_usuario_id)
-            SELECT %s, p.id, %s::date, (%s::date + p.vigencia)::date, p.precio,
+            SELECT %s, p.id, %s::date, (%s::date + p.vigencia)::date, COALESCE(%s, p.precio),
                    p.entrenamientos_mensuales, p.max_dias_semanales, p.max_ingresos_diarios, %s
               FROM plan p
              WHERE p.id = %s
             RETURNING id, fecha_vencimiento, precio;
         """
         with usar_conexion(conn) as c, c.cursor() as cur:
-            cur.execute(query, (socio_id, fecha_inicio, fecha_inicio, registrado_por_usuario_id,
+            cur.execute(query, (socio_id, fecha_inicio, fecha_inicio, precio, registrado_por_usuario_id,
                                 plan_id))
             fila = cur.fetchone()
             if fila is None:
@@ -101,6 +102,18 @@ class MembresiaRepository:
         with usar_conexion(conn) as c, c.cursor() as cur:
             cur.execute(query, (socio_id,))
             return cur.fetchall()
+
+    def cerrar_activas(self, socio_id, conn=None):
+        """Cierra las membresías 'activa' del socio (pasan a 'cancelada', el único
+        estado cerrado del esquema). Devuelve los ids cerrados."""
+        query = """
+            UPDATE membresia SET estado = 'cancelada'
+             WHERE socio_id = %s AND estado = 'activa'
+            RETURNING id;
+        """
+        with usar_conexion(conn) as c, c.cursor() as cur:
+            cur.execute(query, (socio_id,))
+            return [fila[0] for fila in cur.fetchall()]
 
     def actualizar_estado(self, membresia_id, estado, conn=None):
         """estado: 'activa', 'suspendida' o 'cancelada' (lo controla el CHECK)."""

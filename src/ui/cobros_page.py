@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from services.cobro_service import METODOS, ReglaDeCobro, validar_cobro
+from services.cobro_service import METODOS, ReglaDeCobro, descuento_por_cambio, validar_cobro
 from services.persona_service import DatosInvalidos
 from services.reglas_ingreso import fecha_texto, hora_texto, pesos
 from ui import tema
@@ -228,6 +228,11 @@ class CobrosPage(QWidget):
     def _plan_actual(self):
         return next((p for p in self._planes if p[0] == self.plan.currentData()), None)
 
+    def _a_cobrar(self, plan):
+        """(precio a cobrar, descuento) del plan elegido para este socio."""
+        descuento = descuento_por_cambio(self.socio["membresias"], plan, self.socio["inicio_nueva"])
+        return Decimal(plan[6]) - descuento, descuento
+
     def _plan_elegido(self, *_):
         plan = self._plan_actual()
         self.campos["plan"].limpiar_error()
@@ -240,7 +245,8 @@ class CobrosPage(QWidget):
             self.cobrar_boton.setEnabled(False)
             return
         self.cobrar_boton.setEnabled(True)
-        self.monto.setText(_monto_texto(plan[6]))
+        a_cobrar, descuento = self._a_cobrar(plan)
+        self.monto.setText(_monto_texto(a_cobrar))
         inicio = self.socio["inicio_nueva"]
         try:
             vence = self.servicio.vencimiento(plan[0], inicio)
@@ -251,14 +257,19 @@ class CobrosPage(QWidget):
             texto += f", y vence el {fecha_texto(vence)} (ese día ya tiene que renovar)"
         if (self.socio["estado"] or {}).get("estado_membresia") in ("vigente", "agotada", "no_vigente"):
             texto += ". Reemplaza al plan actual desde hoy"
-        self.periodo.setText(texto + ".")
+        texto += "."
+        if descuento:
+            texto += (f" Precio {pesos(plan[6])} − Pase por día de hoy {pesos(descuento)} = "
+                      f"{pesos(a_cobrar)}.")
+        self.periodo.setText(texto)
 
     # --- Cobros ---
 
     def cobrar(self):
         self.resultado.hide()
         plan = self._plan_actual()
-        errores, monto = validar_cobro(plan, self.monto.text(), self.metodo.currentData())
+        maximo = self._a_cobrar(plan)[0] if plan is not None and self.socio is not None else None
+        errores, monto = validar_cobro(plan, self.monto.text(), self.metodo.currentData(), maximo=maximo)
         for nombre, campo in self.campos.items():
             campo.mostrar_error(errores[nombre]) if nombre in errores else campo.limpiar_error()
         if errores or self.socio is None:
@@ -272,6 +283,8 @@ class CobrosPage(QWidget):
             return self._mostrar_resultado(f"No se pudo cobrar. {error}", "error")
         texto = (f"Listo: {venta.plan} del {fecha_texto(venta.fecha_inicio)} al "
                  f"{fecha_texto(venta.fecha_vencimiento)}. Pagó {pesos(venta.pagado)}.")
+        if venta.descuento:
+            texto += f" Se descontaron {pesos(venta.descuento)} del Pase por día de hoy, que quedó cerrado."
         if venta.saldo > 0:
             texto += f" Queda debiendo {pesos(venta.saldo)}."
         self._refrescar(texto)

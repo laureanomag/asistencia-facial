@@ -71,6 +71,15 @@ pago** y reemplaza al actual desde ese día.
 - **Condiciones copiadas:** cada membresía copia el precio y los límites del
   plan en el momento de la venta. Si la dueña cambia un plan en Configuración,
   las membresías ya vendidas no cambian.
+- **El plan anterior queda cerrado:** siempre que se vende un plan nuevo, las
+  membresías anteriores del socio pasan a `cancelada` (el único estado cerrado
+  del esquema). En Estado del socio figuran como "Cerrada".
+- **Descuento solo en un caso:** si el socio tiene un Pase por día que empezó
+  hoy y ese mismo día cambia a un plan mensual, se descuenta lo que pagó por el
+  pase. Ejemplo: Pase por día $3.000 y "3 veces por semana" $40.000, se cobran
+  $37.000 y la recaudación suma $40.000. El descuento queda en el precio de la
+  membresía nueva. En cualquier otro caso (renovación, plan vencido, pase de
+  otro día, de un pase a otro pase) se cobra el precio completo.
 
 ## Meses de 28 a 31 días
 

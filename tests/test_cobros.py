@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from apoyo_db import HOY_AR, membresia, persona, requiere_base, socio, valor  # noqa: E402
 from services.auth_service import ADMINISTRADOR, ENTRENADOR, AccesoDenegado, Sesion  # noqa: E402
 from services.cobro_service import (  # noqa: E402
-    CobroService, ReglaDeCobro, parsear_monto, validar_cobro,
+    CobroService, ReglaDeCobro, descuento_por_cambio, parsear_monto, validar_cobro,
 )
 from ui import tema  # noqa: E402
 
@@ -90,8 +90,79 @@ def test_cambio_de_plan_empieza_el_dia_del_pago(db):
     venta = servicio.vender(PROFE, sid, plan_id, Decimal("18000"), "mercado_pago")
     assert venta.fecha_inicio == hoy and venta.plan == "3 veces por semana"
     assert venta.fecha_vencimiento == valor(db, "SELECT (%s::date + INTERVAL '1 month')::date", (hoy,))
-    # El plan nuevo reemplaza al actual desde hoy.
+    # El plan nuevo reemplaza al actual desde hoy y el anterior queda cerrado.
     assert servicio.buscar_socio(PROFE, "30111222")["estado"]["plan"] == "3 veces por semana"
+    assert _estados(db, sid) == [("Pase libre", "cancelada"), ("3 veces por semana", "activa")]
+
+
+def _estados(db, socio_id):
+    return [tuple(f) for f in db.execute(
+        "SELECT p.nombre, m.estado FROM membresia m JOIN plan p ON p.id = m.plan_id "
+        "WHERE m.socio_id = %s ORDER BY m.id", (socio_id,))]
+
+
+def _cobrado(db, socio_id):
+    return valor(db, "SELECT COALESCE(SUM(pg.monto), 0) FROM pago pg JOIN membresia m ON m.id = pg.membresia_id "
+                     "WHERE m.socio_id = %s", (socio_id,))
+
+
+@requiere_base
+def test_pase_por_dia_de_hoy_a_plan_mensual_descuenta_lo_pagado(db):
+    sid = socio(db, persona(db))
+    pase = _precio(db, "Pase por día", 3000)
+    mensual = _precio(db, "3 veces por semana", 40000)
+    servicio = CobroService()
+    servicio.vender(PROFE, sid, pase, Decimal("3000"), "efectivo")
+    with pytest.raises(ReglaDeCobro, match="No puede superar"):     # no se puede cobrar el precio completo
+        servicio.vender(PROFE, sid, mensual, Decimal("40000"), "efectivo")
+    venta = servicio.vender(PROFE, sid, mensual, Decimal("37000"), "efectivo")
+    assert (venta.precio, venta.descuento, venta.saldo) == (Decimal("37000"), Decimal("3000"), Decimal("0"))
+    assert _estados(db, sid) == [("Pase por día", "cancelada"), ("3 veces por semana", "activa")]
+    assert _cobrado(db, sid) == Decimal("40000")                    # la recaudación suma 40.000, no 43.000
+    estado = servicio.buscar_socio(PROFE, "30111222")["estado"]
+    assert (estado["plan"], estado["saldo"]) == ("3 veces por semana", 0)
+
+
+@requiere_base
+def test_pase_pagado_en_parte_descuenta_solo_lo_pagado(db):
+    sid = socio(db, persona(db))
+    pase = _precio(db, "Pase por día", 3000)
+    mensual = _precio(db, "3 veces por semana", 40000)
+    servicio = CobroService()
+    servicio.vender(PROFE, sid, pase, Decimal("1000"), "efectivo")
+    venta = servicio.vender(PROFE, sid, mensual, Decimal("39000"), "debito")
+    assert (venta.precio, venta.descuento) == (Decimal("39000"), Decimal("1000"))
+
+
+@requiere_base
+def test_sin_descuento_se_cobra_el_precio_completo_y_cierra_el_anterior(db):
+    mensual = _precio(db, "3 veces por semana", 40000)
+    pase = _precio(db, "Pase por día", 3000)
+    servicio = CobroService()
+    # Pase por día de ayer.
+    ayer = socio(db, persona(db))
+    membresia(db, ayer, plan="Pase por día", precio=Decimal("3000"), desde=-1)
+    assert servicio.vender(PROFE, ayer, mensual, Decimal("40000"), "efectivo").descuento == 0
+    assert _estados(db, ayer) == [("Pase por día", "cancelada"), ("3 veces por semana", "activa")]
+    # Renovación de un plan mensual y de un pase por otro pase.
+    otro = socio(db, persona(db, "20333444", "Luis", "Gómez"))
+    servicio.vender(PROFE, otro, mensual, Decimal("40000"), "efectivo")
+    assert servicio.vender(PROFE, otro, mensual, Decimal("40000"), "efectivo").descuento == 0
+    assert servicio.vender(PROFE, otro, pase, Decimal("3000"), "efectivo").descuento == 0
+    assert [e for _p, e in _estados(db, otro)] == ["cancelada", "cancelada", "activa"]
+
+
+def test_descuento_por_cambio():
+    hoy = date(2026, 11, 14)
+    mensual = (2, "3 veces por semana", "1 mon", None, 3, 1, Decimal("40000"), True)
+    pase = (1, "Pase por día", "1 day", None, None, 1, Decimal("3000"), True)
+    de_hoy = (4, "Pase por día", hoy, hoy + timedelta(days=1), Decimal("3000"), "activa", Decimal("3000"))
+    assert descuento_por_cambio([de_hoy], mensual, hoy) == Decimal("3000")
+    assert descuento_por_cambio([de_hoy], pase, hoy) == 0                    # de pase a pase, no
+    de_ayer = (4, "Pase por día", hoy - timedelta(days=1), hoy, Decimal("3000"), "activa", Decimal("3000"))
+    assert descuento_por_cambio([de_ayer], mensual, hoy) == 0
+    cerrado = de_hoy[:5] + ("cancelada", Decimal("3000"))
+    assert descuento_por_cambio([cerrado], mensual, hoy) == 0
 
 
 @requiere_base
@@ -223,3 +294,26 @@ def test_dni_que_no_es_socio_o_dado_de_baja(app):
     pagina.dni.setText("12")
     pagina.buscar()
     assert pagina.campo_dni.mensaje.text() == "El DNI debe tener 7 u 8 dígitos."
+
+
+def test_pantalla_muestra_el_descuento_del_pase_de_hoy(app):
+    from ui.cobros_page import CobrosPage
+    hoy = date(2026, 11, 13)
+    socio_con_pase = dict(SOCIO, membresias=[
+        (8, "Pase por día", hoy, hoy + timedelta(days=1), Decimal("3000"), "activa", Decimal("3000"))],
+        estado={"plan": "Pase por día", "fecha_vencimiento": hoy + timedelta(days=1),
+                "estado_membresia": "vigente", "estado_contable": "al_dia"})
+    servicio = ServicioFalso(socio_con_pase)
+    servicio.planes = lambda sesion: [(3, "3 veces por semana", "1 mon", None, 3, 1, Decimal("40000"), True)]
+    pagina = CobrosPage(PROFE, servicio)
+    pagina.show()
+    app.processEvents()
+    pagina.dni.setText("30111222")
+    pagina.buscar()
+    pagina.plan.setCurrentIndex(1)
+    assert pagina.monto.text() == "37.000,00"
+    assert "Precio $40.000,00 − Pase por día de hoy $3.000,00 = $37.000,00." in pagina.periodo.text()
+    pagina.metodo.setCurrentIndex(pagina.metodo.findData("efectivo"))
+    pagina.monto.setText("40.000")
+    pagina.cobrar()
+    assert pagina.campos["monto"].mensaje.text() == "No puede superar $37.000,00." and servicio.ventas == []
