@@ -2,7 +2,7 @@
 plan (con pago total o parcial) y cobrar el saldo pendiente."""
 from decimal import Decimal
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QGridLayout, QHBoxLayout, QLineEdit, QPushButton, QScrollArea, QVBoxLayout,
     QWidget,
@@ -38,6 +38,7 @@ class CobrosPage(QWidget):
         self.sesion, self.servicio = sesion, servicio
         self.socio = None
         self._planes = []
+        self._procesando = False        # hay un cobro en curso: se ignora otro clic
 
         # --- Buscar socio ---
         self.dni = QLineEdit()
@@ -171,7 +172,7 @@ class CobrosPage(QWidget):
                                          "en Estado del socio.")
         self._mostrar_socio(socio)
 
-    def _mostrar_socio(self, socio):
+    def _mostrar_socio(self, socio, limpiar=False):
         self.socio = socio
         while self.chips.count():
             item = self.chips.takeAt(0)
@@ -196,7 +197,7 @@ class CobrosPage(QWidget):
         self.chips.addStretch()
         if not activo:
             return
-        self._cargar_planes()
+        self._cargar_planes(limpiar)
         llenar(self.pagos, [[f"{fecha_texto(f)} {hora_texto(f)}", plan, pesos(monto), METODOS.get(metodo, metodo)]
                             for f, monto, metodo, plan, _mid in socio["pagos"]])
         deuda = next(((m[0], m[1], Decimal(m[4]) - Decimal(m[6])) for m in socio["membresias"]
@@ -207,7 +208,7 @@ class CobrosPage(QWidget):
             self.saldo_monto.setText(_monto_texto(deuda[2]))
             self.saldo.show()
 
-    def _cargar_planes(self):
+    def _cargar_planes(self, limpiar=False):
         try:
             self._planes = list(self.servicio.planes(self.sesion))
         except Exception as error:
@@ -220,7 +221,8 @@ class CobrosPage(QWidget):
             precio = Decimal(plan[6])
             self.plan.addItem(f"{plan[1]} · {pesos(precio) if precio > 0 else 'sin precio'}", plan[0])
         actual = (self.socio["estado"] or {}).get("plan")
-        indice = next((i + 1 for i, p in enumerate(self._planes) if p[1] == actual and Decimal(p[6]) > 0), 0)
+        indice = 0 if limpiar else next(
+            (i + 1 for i, p in enumerate(self._planes) if p[1] == actual and Decimal(p[6]) > 0), 0)
         self.plan.setCurrentIndex(indice)
         self.plan.blockSignals(False)
         self._plan_elegido()
@@ -238,6 +240,8 @@ class CobrosPage(QWidget):
         self.campos["plan"].limpiar_error()
         self.periodo.setText("")
         if plan is None or self.socio is None:
+            self.monto.clear()
+            self.cobrar_boton.setEnabled(False)          # hasta que se elija un plan
             return
         if Decimal(plan[6]) <= 0:
             errores, _ = validar_cobro(plan, "1", "efectivo")
@@ -265,7 +269,14 @@ class CobrosPage(QWidget):
 
     # --- Cobros ---
 
+    def _reactivar(self, boton):
+        """Vuelve a activar el botón después de procesar los clics que quedaron en
+        cola mientras se cobraba (así un doble clic no cobra dos veces)."""
+        QTimer.singleShot(0, lambda: boton.setEnabled(True))
+
     def cobrar(self):
+        if self._procesando:
+            return
         self.resultado.hide()
         plan = self._plan_actual()
         maximo = self._a_cobrar(plan)[0] if plan is not None and self.socio is not None else None
@@ -274,13 +285,17 @@ class CobrosPage(QWidget):
             campo.mostrar_error(errores[nombre]) if nombre in errores else campo.limpiar_error()
         if errores or self.socio is None:
             return
+        self._procesando = True
+        self.cobrar_boton.setEnabled(False)
         try:
             venta = self.servicio.vender(self.sesion, self.socio["socio_id"], plan[0], monto,
                                          self.metodo.currentData())
-        except ReglaDeCobro as error:
-            return self._mostrar_resultado(str(error), "error")
         except Exception as error:
-            return self._mostrar_resultado(f"No se pudo cobrar. {error}", "error")
+            self._reactivar(self.cobrar_boton)
+            texto = str(error) if isinstance(error, ReglaDeCobro) else f"No se pudo cobrar. {error}"
+            return self._mostrar_resultado(texto, "error")
+        finally:
+            self._procesando = False
         texto = (f"Listo: {venta.plan} del {fecha_texto(venta.fecha_inicio)} al "
                  f"{fecha_texto(venta.fecha_vencimiento)}. Pagó {pesos(venta.pagado)}.")
         if venta.descuento:
@@ -290,6 +305,8 @@ class CobrosPage(QWidget):
         self._refrescar(texto)
 
     def cobrar_saldo(self):
+        if self._procesando:
+            return
         self.resultado.hide()
         if self.socio is None or not self._deuda:
             return
@@ -300,23 +317,32 @@ class CobrosPage(QWidget):
             campo.mostrar_error(errores[nombre]) if nombre in errores else campo.limpiar_error()
         if errores:
             return
+        self._procesando = True
+        self.cobrar_saldo_boton.setEnabled(False)
         try:
             resta = self.servicio.pagar_saldo(self.sesion, self.socio["socio_id"], membresia_id, monto,
                                               self.saldo_metodo.currentData())
-        except ReglaDeCobro as error:
-            return self._mostrar_resultado(str(error), "error")
         except Exception as error:
-            return self._mostrar_resultado(f"No se pudo cobrar el saldo. {error}", "error")
+            texto = str(error) if isinstance(error, ReglaDeCobro) else f"No se pudo cobrar el saldo. {error}"
+            return self._mostrar_resultado(texto, "error")
+        finally:
+            self._procesando = False
+            self._reactivar(self.cobrar_saldo_boton)
         self._refrescar(f"Pagó {pesos(monto)}. " + (f"Todavía debe {pesos(resta)}." if resta > 0
                                                     else "La membresía quedó paga."))
 
     def _refrescar(self, texto):
+        """Después de un cobro: datos del socio al día y formulario limpio (sin plan,
+        sin monto ni medio de pago, "Cobrar" desactivado hasta elegir otro plan)."""
         self.metodo.setCurrentIndex(0)
         self.saldo_metodo.setCurrentIndex(0)
+        for campo in (*self.campos.values(), *self.campos_saldo.values()):
+            campo.limpiar_error()
         try:
-            self._mostrar_socio(self.servicio.buscar_socio(self.sesion, self.dni.text()))
+            self._mostrar_socio(self.servicio.buscar_socio(self.sesion, self.dni.text()), limpiar=True)
         except Exception:
             pass
+        self.saldo_monto.clear()
         self._mostrar_resultado(texto, "ok")
 
     def _mostrar_resultado(self, texto, rol):

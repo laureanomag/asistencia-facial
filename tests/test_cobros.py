@@ -317,3 +317,68 @@ def test_pantalla_muestra_el_descuento_del_pase_de_hoy(app):
     pagina.monto.setText("40.000")
     pagina.cobrar()
     assert pagina.campos["monto"].mensaje.text() == "No puede superar $37.000,00." and servicio.ventas == []
+
+
+def _listo_para_cobrar(app, servicio):
+    from ui.cobros_page import CobrosPage
+    pagina = CobrosPage(PROFE, servicio)
+    pagina.show()
+    app.processEvents()
+    pagina.dni.setText("30111222")
+    pagina.buscar()
+    pagina.metodo.setCurrentIndex(pagina.metodo.findData("efectivo"))
+    return pagina
+
+
+def test_despues_de_cobrar_el_formulario_queda_limpio(app):
+    pagina = _listo_para_cobrar(app, ServicioFalso(SOCIO))
+    assert pagina.plan.currentText() == "Pase libre · $25.000,00" and pagina.cobrar_boton.isEnabled()
+    pagina.cobrar()
+    assert len(pagina.servicio.ventas) == 1 and pagina.resultado.text().startswith("Listo:")
+    assert (pagina.plan.currentIndex(), pagina.monto.text(), pagina.metodo.currentIndex()) == (0, "", 0)
+    assert not pagina.cobrar_boton.isEnabled()
+    pagina.cobrar()                                   # un segundo intento sin elegir plan no cobra
+    assert len(pagina.servicio.ventas) == 1
+    pagina.plan.setCurrentIndex(pagina.plan.findData(3))
+    assert pagina.cobrar_boton.isEnabled()
+
+
+def test_doble_clic_cobra_una_sola_vez(app):
+    servicio = ServicioFalso(SOCIO)
+    vender = servicio.vender
+
+    def vender_con_otro_clic(*argumentos):
+        pagina.cobrar_boton.click()                   # el segundo clic llega mientras se procesa
+        pagina.cobrar()
+        assert not pagina.cobrar_boton.isEnabled()
+        return vender(*argumentos)
+    servicio.vender = vender_con_otro_clic
+    pagina = _listo_para_cobrar(app, servicio)
+    pagina.cobrar()
+    app.processEvents()
+    assert len(servicio.ventas) == 1
+
+
+def test_si_el_cobro_falla_el_boton_vuelve_y_los_datos_quedan(app):
+    servicio = ServicioFalso(SOCIO)
+
+    def falla(*_):
+        raise ReglaDeCobro("El socio está dado de baja.")
+    servicio.vender = falla
+    pagina = _listo_para_cobrar(app, servicio)
+    pagina.cobrar()
+    assert not pagina.cobrar_boton.isEnabled()        # hasta procesar los clics pendientes
+    app.processEvents()
+    assert pagina.cobrar_boton.isEnabled() and pagina.resultado.text() == "El socio está dado de baja."
+    assert pagina.plan.currentText() == "Pase libre · $25.000,00" and pagina.monto.text() == "25.000,00"
+
+
+def test_despues_de_cobrar_el_saldo_se_limpia(app):
+    pagina = _listo_para_cobrar(app, ServicioFalso(SOCIO))
+    pagina.saldo_metodo.setCurrentIndex(pagina.saldo_metodo.findData("debito"))
+    pagina.cobrar_saldo()
+    app.processEvents()
+    assert len(pagina.servicio.saldos) == 1
+    assert (pagina.saldo_metodo.currentIndex(), pagina.saldo_monto.text()) == (0, "")
+    pagina.cobrar_saldo()                             # sin medio de pago no vuelve a cobrar
+    assert len(pagina.servicio.saldos) == 1
